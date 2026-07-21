@@ -51,5 +51,16 @@ key, scoring formula, quality floor all present).
 - **P0 (backup & restore) — DONE.** Footer Export/Import buttons; export downloads a
   dated `.json`; import validates shape + deep integrity (every ranked id exists in
   `books`) and confirms before overwriting. Purely additive; data model unchanged.
-  Committed. (User still to run the real-browser QA of download/upload round-trip.)
-- **Next up: P1 (re-ranking an existing book)** — see PRD Section 7.
+- **P1 (re-rank an existing book) — DONE.** Inline "Re-rank" on the detail view: pick a
+  tier (keep or move), re-run comparisons excluding the book itself, note/metadata kept,
+  nothing written until finished (cancel-safe).
+- **Polish (off-backlog, DONE):**
+  - Remove control de-emphasized to a quiet "Remove from catalog" link, separated from
+    Close/Save; keeps the two-step "Really remove?" confirm.
+  - **"Too close to call" button removed** — a deliberate deviation from PRD §4.1/§4.5.
+    Rationale: it claimed indecision but silently placed the book below the rival, and
+    with small tiers the "near-equal" scores were a full point apart. Every placement now
+    resolves via the comparisons. (Scoring formula/data model unchanged.)
+- **Next up: P2a (findability — search, sort, filter)** — see PRD Section 7. View-only;
+  must never change stored order/scores.
+- Reminder: user still to run the real-browser QA pass on the above.

@@ -198,10 +198,6 @@
     text-align:center; font-size:12px; color:var(--ink-faint);
     text-transform:uppercase; letter-spacing:2px; margin:2px 0;
   }
-  .close-x{
-    grid-column:1/-1; text-align:center; margin-top:16px;
-  }
-
   /* detail */
   .detail-head{display:flex; justify-content:space-between; align-items:flex-start; gap:16px}
   .detail-stamp{text-align:center; min-width:70px}
@@ -504,13 +500,9 @@
           '<span class="pa">'+newSub+'</span></button>'+
         '<button class="pick" id="p-old"><span class="pt">'+esc(rival.title)+'</span>'+
           '<span class="pa">'+(rival.author?esc(rival.author):"already filed")+'</span></button>'+
-      '</div>'+
-      '<div class="row" style="justify-content:center">'+
-        '<button class="btn ghost" id="p-tie">Too close to call</button>'+
       '</div>';
     document.getElementById("p-new").onclick = ()=>{ flow.hi = mid; renderFlow(); };       // new wins -> upper half
     document.getElementById("p-old").onclick = ()=>{ flow.lo = mid + 1; renderFlow(); };    // rival wins -> lower half
-    document.getElementById("p-tie").onclick = ()=>{ finalize(mid + 1); };                  // tie -> sit just below rival
   }
 
   function finalize(index){
