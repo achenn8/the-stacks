@@ -163,8 +163,6 @@
   .btn.primary:hover{background:#853A2D}
   .btn.ghost{background:transparent; color:var(--ink-soft); border-color:var(--card-edge)}
   .btn.ghost:hover{color:var(--ink); border-color:var(--ink-soft)}
-  .btn.danger{background:transparent; color:var(--brick); border-color:var(--brick)}
-  .btn.danger:hover{background:var(--brick); color:var(--card)}
   .btn:focus-visible{outline:2px solid var(--stamp); outline-offset:2px}
 
   /* tier choice */
@@ -221,6 +219,16 @@
   .inline-act:hover{text-decoration:underline}
   .inline-act:focus-visible{outline:2px solid var(--stamp); outline-offset:2px; border-radius:2px}
   .tier-cur{font-weight:400; font-size:12px; color:var(--ink-faint); letter-spacing:.5px}
+  /* de-emphasized, separated Remove control in the detail view */
+  .detail-actions{justify-content:space-between; align-items:center}
+  .detail-actions-main{display:flex; gap:10px; flex-wrap:wrap}
+  .removelink{
+    font-family:"Space Mono",monospace; font-size:13px; font-weight:700; letter-spacing:.3px;
+    cursor:pointer; background:transparent; border:none; padding:6px 2px; color:var(--ink-faint);
+  }
+  .removelink:hover{color:var(--brick); text-decoration:underline}
+  .removelink:focus-visible{outline:2px solid var(--stamp); outline-offset:2px; border-radius:2px}
+  .removelink.armed{color:var(--brick); text-decoration:underline}
 
   .confirm{text-align:center; padding:8px 0 4px}
   .confirm .big-stamp .num{font-weight:700; font-size:44px; color:var(--stamp); border:3px solid var(--stamp); border-radius:var(--radius); padding:6px 16px; display:inline-block}
@@ -575,10 +583,12 @@
         ' <button type="button" class="inline-act" id="d-rerank">Re-rank</button></div>'+
       '<label class="fld"><span>A line to remember it by</span>'+
         '<textarea id="d-take" rows="3" placeholder="add a thought or favorite quote">'+esc(b.takeaway||"")+'</textarea></label>'+
-      '<div class="row">'+
-        '<button class="btn danger" id="d-remove">Remove</button>'+
-        '<button class="btn ghost" id="d-close">Close</button>'+
-        '<button class="btn primary" id="d-save">Save note</button>'+
+      '<div class="row detail-actions">'+
+        '<button type="button" class="removelink" id="d-remove">Remove from catalog</button>'+
+        '<span class="detail-actions-main">'+
+          '<button class="btn ghost" id="d-close">Close</button>'+
+          '<button class="btn primary" id="d-save">Save note</button>'+
+        '</span>'+
       '</div>';
     document.getElementById("d-close").onclick = closeModal;
     document.getElementById("d-rerank").onclick = ()=>{
@@ -603,6 +613,7 @@
       }else{
         btn.dataset.armed = "1";
         btn.textContent = "Really remove?";
+        btn.classList.add("armed");
       }
     };
   }
