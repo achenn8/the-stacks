@@ -46,6 +46,10 @@ Full requirements are in `PRD-the-stacks.md` — read it before any non-trivial 
 - **P3** Personal insights (only meaningful once ~15+ books logged).
 
 ## Current status
-v1 is built and in the folder (`the-stacks.html`) — it matches the PRD Section 4 spec
-(core loop, data model, `the-stacks-v1` key, scoring formula, quality floor all present).
-Next up: P0 export/import (PRD Section 7).
+v1 is built and matches the PRD Section 4 spec (core loop, data model, `the-stacks-v1`
+key, scoring formula, quality floor all present).
+- **P0 (backup & restore) — DONE.** Footer Export/Import buttons; export downloads a
+  dated `.json`; import validates shape + deep integrity (every ranked id exists in
+  `books`) and confirms before overwriting. Purely additive; data model unchanged.
+  Committed. (User still to run the real-browser QA of download/upload round-trip.)
+- **Next up: P1 (re-ranking an existing book)** — see PRD Section 7.
