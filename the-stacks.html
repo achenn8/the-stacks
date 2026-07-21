@@ -211,6 +211,16 @@
   .detail-stamp .rank{display:block; font-size:11px; color:var(--ink-faint); text-transform:uppercase; letter-spacing:1px; margin-top:6px}
   .filed{font-size:13px; color:var(--ink-soft); margin:14px 0 20px; text-transform:uppercase; letter-spacing:1px}
   .filed b{color:var(--ink)}
+  /* inline "Re-rank" action on the Filed line */
+  .inline-act{
+    font-family:"Space Mono",monospace; font-size:11px; font-weight:700;
+    text-transform:uppercase; letter-spacing:1px; cursor:pointer;
+    background:transparent; color:var(--stamp); border:none;
+    padding:0 0 0 8px; margin-left:8px; border-left:1px solid var(--card-edge);
+  }
+  .inline-act:hover{text-decoration:underline}
+  .inline-act:focus-visible{outline:2px solid var(--stamp); outline-offset:2px; border-radius:2px}
+  .tier-cur{font-weight:400; font-size:12px; color:var(--ink-faint); letter-spacing:.5px}
 
   .confirm{text-align:center; padding:8px 0 4px}
   .confirm .big-stamp .num{font-weight:700; font-size:44px; color:var(--stamp); border:3px solid var(--stamp); border-radius:var(--radius); padding:6px 16px; display:inline-block}
@@ -428,45 +438,62 @@
   }
 
   function renderTier(){
+    const reranking = !!flow.reId;
+    const currentTier = reranking ? store.books[flow.reId].tier : null;
     let picks = "";
     TIERS.forEach(t=>{
       const m = TIER_META[t];
-      picks += '<button class="tier-pick" data-t="'+t+'"><b>'+m.label+'</b>'+
+      const cur = t===currentTier ? ' <span class="tier-cur">· current</span>' : "";
+      picks += '<button class="tier-pick" data-t="'+t+'"><b>'+m.label+cur+'</b>'+
                '<small>'+m.sub+'</small></button>';
     });
     sheet.innerHTML =
-      '<h2 id="sheetTitle">How did “'+esc(flow.title)+'” land?</h2>'+
-      '<p class="step-tag">Step 2 of 3 · gut check first, comparison after</p>'+
+      '<h2 id="sheetTitle">'+(reranking
+          ? 'Re-file “'+esc(flow.title)+'”'
+          : 'How did “'+esc(flow.title)+'” land?')+'</h2>'+
+      '<p class="step-tag">'+(reranking
+          ? 'Pick a tier — keep it here or move it, then re-rank'
+          : 'Step 2 of 3 · gut check first, comparison after')+'</p>'+
       '<div class="tiers">'+picks+'</div>'+
       '<div class="row"><button class="btn ghost" id="t-back">Back</button></div>';
-    document.getElementById("t-back").onclick = ()=>{ flow.step="meta"; renderFlow(); };
+    document.getElementById("t-back").onclick = ()=>{
+      if(reranking){ openDetail(flow.reId); } else { flow.step="meta"; renderFlow(); }
+    };
     sheet.querySelectorAll(".tier-pick").forEach(btn=>{
       btn.onclick = ()=>{ flow.tier = btn.dataset.t; startPlacement(); };
     });
   }
 
   // Begin binary-search placement within the chosen tier.
+  // The comparison pool excludes the book being re-ranked (flow.reId), so a book is
+  // never compared against itself. For a brand-new book, reId is undefined and the
+  // filter removes nothing.
   function startPlacement(){
-    const arr = store.rankings[flow.tier];
-    if(arr.length === 0){ finalize(0); return; }
-    flow.lo = 0; flow.hi = arr.length; flow.round = 0;
+    flow.pool = store.rankings[flow.tier].filter(x => x !== flow.reId);
+    if(flow.pool.length === 0){ finalize(0); return; }
+    flow.lo = 0; flow.hi = flow.pool.length; flow.round = 0;
     flow.step = "compare";
     renderFlow();
   }
 
   function renderCompare(){
-    const arr = store.rankings[flow.tier];
+    const arr = flow.pool;
     // resolved?
     if(flow.lo >= flow.hi){ finalize(flow.lo); return; }
     flow.round++;
     const mid = Math.floor((flow.lo + flow.hi) / 2);
     const rival = store.books[arr[mid]];
+    const tag = flow.reId
+      ? 'Re-ranking · comparison '+flow.round+' · '+TIER_META[flow.tier].label
+      : 'Step 3 of 3 · comparison '+flow.round+' · filed under '+TIER_META[flow.tier].label;
+    const newSub = flow.author ? esc(flow.author)
+                 : (flow.reId ? "the book you're re-ranking" : "your new entry");
     sheet.innerHTML =
       '<h2 id="sheetTitle">Which did you enjoy more?</h2>'+
-      '<p class="step-tag">Step 3 of 3 · comparison '+flow.round+' · filed under '+TIER_META[flow.tier].label+'</p>'+
+      '<p class="step-tag">'+tag+'</p>'+
       '<div class="versus">'+
         '<button class="pick" id="p-new"><span class="pt">'+esc(flow.title)+'</span>'+
-          '<span class="pa">'+(flow.author?esc(flow.author):"your new entry")+'</span></button>'+
+          '<span class="pa">'+newSub+'</span></button>'+
         '<button class="pick" id="p-old"><span class="pt">'+esc(rival.title)+'</span>'+
           '<span class="pa">'+(rival.author?esc(rival.author):"already filed")+'</span></button>'+
       '</div>'+
@@ -479,21 +506,32 @@
   }
 
   function finalize(index){
-    const id = "b" + Date.now().toString(36) + Math.floor(Math.random()*1e4).toString(36);
-    store.books[id] = {
-      id, title:flow.title, author:flow.author, takeaway:flow.takeaway,
-      tier:flow.tier, dateFinished: new Date().toLocaleDateString("en-US",{month:"short",year:"numeric"})
-    };
+    let id;
+    if(flow.reId){
+      // Re-rank: reuse the existing book (keeps its note/title/author/date).
+      // Pull it out of its old tier list, then re-file it in the chosen tier below.
+      id = flow.reId;
+      const old = store.books[id].tier;
+      store.rankings[old] = store.rankings[old].filter(x => x !== id);
+      store.books[id].tier = flow.tier;
+    } else {
+      id = "b" + Date.now().toString(36) + Math.floor(Math.random()*1e4).toString(36);
+      store.books[id] = {
+        id, title:flow.title, author:flow.author, takeaway:flow.takeaway,
+        tier:flow.tier, dateFinished: new Date().toLocaleDateString("en-US",{month:"short",year:"numeric"})
+      };
+    }
     const arr = store.rankings[flow.tier];
     const clamped = Math.max(0, Math.min(index, arr.length));
     arr.splice(clamped, 0, id);
     save();
-    flow = { mode:"add", step:"done", placedId:id };
+    flow = { mode:"add", step:"done", placedId:id, wasReRank: !!flow.reId };
     renderFlow();
   }
 
   function renderDone(){
     const id = flow.placedId;
+    const wasRe = flow.wasReRank;
     const b = store.books[id];
     const arr = store.rankings[b.tier];
     const rank = arr.indexOf(id) + 1;
@@ -501,15 +539,15 @@
     sheet.innerHTML =
       '<div class="confirm">'+
         '<div class="big-stamp"><span class="num">'+score+'</span></div>'+
-        '<p>Filed <b>“'+esc(b.title)+'”</b> under <b>'+TIER_META[b.tier].label+'</b>, '+
+        '<p>'+(wasRe?"Re-filed":"Filed")+' <b>“'+esc(b.title)+'”</b> under <b>'+TIER_META[b.tier].label+'</b>, '+
         'ranked <b>#'+rank+' of '+arr.length+'</b> in that drawer.<br>'+
         'Its call number moves as you file more nearby.</p>'+
       '</div>'+
       '<div class="row" style="justify-content:center; margin-top:24px">'+
-        '<button class="btn ghost" id="d-again">Log another</button>'+
+        (wasRe ? "" : '<button class="btn ghost" id="d-again">Log another</button>')+
         '<button class="btn primary" id="d-done">Back to the stacks</button>'+
       '</div>';
-    document.getElementById("d-again").onclick = openAdd;
+    if(!wasRe) document.getElementById("d-again").onclick = openAdd;
     document.getElementById("d-done").onclick = ()=>{ const hl=id; closeModal(); render(hl); };
     render(id); // refresh shelf underneath
   }
@@ -533,7 +571,8 @@
         '<div class="detail-stamp"><span class="num">'+score+'</span>'+
           '<span class="rank">#'+rank+' of '+arr.length+'</span></div>'+
       '</div>'+
-      '<div class="filed">Filed under <b>'+TIER_META[b.tier].label+'</b></div>'+
+      '<div class="filed">Filed under <b>'+TIER_META[b.tier].label+'</b>'+
+        ' <button type="button" class="inline-act" id="d-rerank">Re-rank</button></div>'+
       '<label class="fld"><span>A line to remember it by</span>'+
         '<textarea id="d-take" rows="3" placeholder="add a thought or favorite quote">'+esc(b.takeaway||"")+'</textarea></label>'+
       '<div class="row">'+
@@ -542,6 +581,14 @@
         '<button class="btn primary" id="d-save">Save note</button>'+
       '</div>';
     document.getElementById("d-close").onclick = closeModal;
+    document.getElementById("d-rerank").onclick = ()=>{
+      const rb = store.books[id];
+      // Start the placement flow for this existing book; nothing is changed in the
+      // store until the user finishes, so cancelling leaves the book exactly as it was.
+      flow = { mode:"add", step:"tier", reId:id, tier:null,
+               title:rb.title, author:rb.author, takeaway:rb.takeaway };
+      renderFlow();
+    };
     document.getElementById("d-save").onclick = ()=>{
       store.books[id].takeaway = document.getElementById("d-take").value.trim();
       save(); const hl=id; closeModal(); render(hl);
