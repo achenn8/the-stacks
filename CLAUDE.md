@@ -61,6 +61,16 @@ key, scoring formula, quality floor all present).
     Rationale: it claimed indecision but silently placed the book below the rival, and
     with small tiers the "near-equal" scores were a full point apart. Every placement now
     resolves via the comparisons. (Scoring formula/data model unchanged.)
-- **Next up: P2a (findability — search, sort, filter)** — see PRD Section 7. View-only;
-  must never change stored order/scores.
+- **P2a (findability — search, sort, filter) — DONE.** Toolbar under the header: search
+  (title/author, live), Sort (By tier default / Newest / Oldest / Title A–Z / Author A–Z),
+  Tier filter, Author filter. Filters + search stack (AND). Non-"By tier" sorts flatten
+  into one cross-catalog list; cards keep tier color + true score. View-only by
+  construction: each card derives rank/score from the store BY ID, never from display
+  order — nothing writes to store. Date sort is month-precision (stored date is "Mon YYYY");
+  exact-day sorting deferred to P2b. Filing a NEW book auto-resets filters so it's visible
+  (re-ranks keep the current view). View state is transient (not persisted).
+- **Next up: P2b (optional genre/tags)** — see PRD Section 7 + Section 9. This is a SCHEMA
+  change: add `genres: string[]`, migrate existing books to `[]`, consider bumping the key
+  to `the-stacks-v2`. Fold in the stored-date field here too (enables exact-day sort in P2a).
+- **Then: P3 (personal insights)** — only meaningful at ~15+ books.
 - Reminder: user still to run the real-browser QA pass on the above.
