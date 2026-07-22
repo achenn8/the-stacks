@@ -257,11 +257,9 @@
   .card[data-tier="fine"]{--tier:var(--sage)}
   .card[data-tier="disliked"]{--tier:var(--brick)}
 
-  /* ---- Findability controls (search / sort / filter) ---- */
-  .controls{
-    max-width:820px; margin:24px auto 0;
-    display:flex; flex-wrap:wrap; gap:12px 14px; align-items:flex-end;
-  }
+  /* ---- Findability controls (search / sort / tier chips) ---- */
+  .controls{ max-width:820px; margin:24px auto 0; display:flex; flex-direction:column; gap:14px }
+  .controls-top{ display:flex; flex-wrap:wrap; gap:12px 14px; align-items:flex-end }
   .ctrl-search{
     flex:1 1 240px; min-width:0;
     font-family:"Space Mono",monospace; font-size:14px; color:var(--ink);
@@ -270,7 +268,6 @@
   }
   .ctrl-search::placeholder{color:var(--ink-faint)}
   .ctrl-search:focus{outline:2px solid var(--stamp); outline-offset:1px; border-color:var(--stamp)}
-  .ctrl-selects{display:flex; flex-wrap:wrap; gap:12px}
   .ctrl-field{display:flex; flex-direction:column; gap:5px}
   .ctrl-lab{font-size:11px; text-transform:uppercase; letter-spacing:1.2px; color:rgba(239,231,213,.5)}
   .ctrl-field select{
@@ -279,6 +276,24 @@
     border-radius:var(--radius); padding:9px 10px; cursor:pointer;
   }
   .ctrl-field select:focus-visible{outline:2px solid var(--stamp); outline-offset:2px}
+  /* tappable tier filter chips */
+  .chips{display:flex; flex-wrap:wrap; gap:8px}
+  .chip{
+    font-family:"Space Mono",monospace; font-size:12px; font-weight:700; letter-spacing:.5px;
+    cursor:pointer; display:inline-flex; align-items:center; gap:7px;
+    background:transparent; color:rgba(239,231,213,.72);
+    border:1px solid rgba(239,231,213,.24); border-radius:999px; padding:7px 14px;
+    transition:background .12s ease, color .12s ease, border-color .12s ease;
+  }
+  .chip:hover{color:var(--card); border-color:rgba(239,231,213,.5)}
+  .chip:focus-visible{outline:2px solid var(--stamp); outline-offset:2px}
+  .chip[data-tier="loved"]::before,
+  .chip[data-tier="fine"]::before,
+  .chip[data-tier="disliked"]::before{ content:""; width:8px; height:8px; border-radius:50%; background:var(--dot) }
+  .chip[data-tier="loved"]{--dot:var(--gold)}
+  .chip[data-tier="fine"]{--dot:var(--sage)}
+  .chip[data-tier="disliked"]{--dot:var(--brick)}
+  .chip.active{background:var(--card); color:var(--ink); border-color:var(--card)}
 
   @media (max-width:520px){
     .brand h1{font-size:30px}
@@ -286,7 +301,6 @@
     .card{grid-template-columns:1fr; }
     .stamp{grid-row:auto; grid-column:1; justify-self:start; text-align:left; margin-top:8px}
     .ctrl-search{flex-basis:100%}
-    .ctrl-selects{width:100%}
     .ctrl-field{flex:1 1 auto}
   }
   @media (prefers-reduced-motion:reduce){
@@ -307,30 +321,23 @@
   </header>
 
   <section class="controls" id="controls" hidden>
-    <input type="search" id="q" class="ctrl-search" placeholder="Search title or author…" aria-label="Search by title or author" autocomplete="off">
-    <div class="ctrl-selects">
+    <div class="controls-top">
+      <input type="search" id="q" class="ctrl-search" placeholder="Search title or author…" aria-label="Search by title or author" autocomplete="off">
       <label class="ctrl-field"><span class="ctrl-lab">Sort</span>
         <select id="sortSel" aria-label="Sort books">
-          <option value="tier">By tier</option>
+          <option value="score">By score</option>
           <option value="newest">Newest finished</option>
           <option value="oldest">Oldest finished</option>
           <option value="title">Title A–Z</option>
           <option value="author">Author A–Z</option>
         </select>
       </label>
-      <label class="ctrl-field"><span class="ctrl-lab">Tier</span>
-        <select id="tierSel" aria-label="Filter by tier">
-          <option value="all">All tiers</option>
-          <option value="loved">Loved it</option>
-          <option value="fine">It was fine</option>
-          <option value="disliked">Didn't like it</option>
-        </select>
-      </label>
-      <label class="ctrl-field"><span class="ctrl-lab">Author</span>
-        <select id="authorSel" aria-label="Filter by author">
-          <option value="all">All authors</option>
-        </select>
-      </label>
+    </div>
+    <div class="chips" id="tierChips" role="group" aria-label="Filter by tier">
+      <button type="button" class="chip" data-tier="all">All</button>
+      <button type="button" class="chip" data-tier="loved">Loved it</button>
+      <button type="button" class="chip" data-tier="fine">It was fine</button>
+      <button type="button" class="chip" data-tier="disliked">Didn't like it</button>
     </div>
   </section>
 
@@ -363,7 +370,7 @@
   let store = load();
   let flow = null; // active add-flow or detail state
   // Transient search/sort/filter view. Never saved to storage; resets on reload.
-  const DEFAULT_VIEW = { query:"", sort:"tier", tier:"all", author:"all" };
+  const DEFAULT_VIEW = { query:"", sort:"score", tier:"all" };
   let view = Object.assign({}, DEFAULT_VIEW);
 
   function load(){
@@ -435,22 +442,11 @@
     TIERS.forEach(t=>{
       if(view.tier!=="all" && view.tier!==t) return;
       store.rankings[t].forEach(id=>{
-        const b = store.books[id];
-        if(view.author!=="all" && (b.author||"")!==view.author) return;
-        if(!matchesQuery(b, q)) return;
+        if(!matchesQuery(store.books[id], q)) return;
         out.push(id);
       });
     });
     return out;
-  }
-
-  function authorList(){
-    const set = new Set(); let hasUnknown = false;
-    TIERS.forEach(t=> store.rankings[t].forEach(id=>{
-      const a = (store.books[id].author||"").trim();
-      if(a) set.add(a); else hasUnknown = true;
-    }));
-    return { authors:[...set].sort((x,y)=>x.localeCompare(y)), hasUnknown };
   }
 
   function sortIds(ids){
@@ -485,16 +481,11 @@
     const q = document.getElementById("q");
     if(document.activeElement!==q) q.value = view.query; // don't fight the cursor while typing
     document.getElementById("sortSel").value = view.sort;
-    document.getElementById("tierSel").value = view.tier;
-    const sel = document.getElementById("authorSel");
-    const {authors, hasUnknown} = authorList();
-    let opts = '<option value="all">All authors</option>';
-    authors.forEach(a=>{ opts += '<option value="'+esc(a)+'">'+esc(a)+'</option>'; });
-    if(hasUnknown) opts += '<option value="">Unknown author</option>';
-    sel.innerHTML = opts;
-    const stillThere = view.author==="all" || (view.author==="" ? hasUnknown : authors.includes(view.author));
-    if(!stillThere) view.author = "all"; // author vanished (e.g. their last book removed)
-    sel.value = view.author;
+    document.querySelectorAll("#tierChips .chip").forEach(chip=>{
+      const on = chip.dataset.tier === view.tier;
+      chip.classList.toggle("active", on);
+      chip.setAttribute("aria-pressed", on ? "true" : "false");
+    });
   }
 
   function render(highlightId){
@@ -531,7 +522,7 @@
       return;
     }
 
-    if(view.sort === "tier"){
+    if(view.sort === "score"){
       TIERS.forEach(tier=>{
         const tierIds = ids.filter(id=> store.books[id].tier===tier);
         if(!tierIds.length) return;
@@ -892,8 +883,12 @@
   // ---- Findability controls wiring ----
   document.getElementById("q").addEventListener("input", e=>{ view.query = e.target.value; render(); });
   document.getElementById("sortSel").addEventListener("change", e=>{ view.sort = e.target.value; render(); });
-  document.getElementById("tierSel").addEventListener("change", e=>{ view.tier = e.target.value; render(); });
-  document.getElementById("authorSel").addEventListener("change", e=>{ view.author = e.target.value; render(); });
+  document.getElementById("tierChips").addEventListener("click", e=>{
+    const chip = e.target.closest(".chip");
+    if(!chip) return;
+    view.tier = chip.dataset.tier;
+    render();
+  });
 
   render();
 })();

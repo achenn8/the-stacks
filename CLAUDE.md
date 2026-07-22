@@ -62,13 +62,17 @@ key, scoring formula, quality floor all present).
     with small tiers the "near-equal" scores were a full point apart. Every placement now
     resolves via the comparisons. (Scoring formula/data model unchanged.)
 - **P2a (findability — search, sort, filter) — DONE.** Toolbar under the header: search
-  (title/author, live), Sort (By tier default / Newest / Oldest / Title A–Z / Author A–Z),
-  Tier filter, Author filter. Filters + search stack (AND). Non-"By tier" sorts flatten
-  into one cross-catalog list; cards keep tier color + true score. View-only by
-  construction: each card derives rank/score from the store BY ID, never from display
-  order — nothing writes to store. Date sort is month-precision (stored date is "Mon YYYY");
+  (title/author, live) + a Sort dropdown (By score default / Newest / Oldest / Title A–Z /
+  Author A–Z) + a row of tappable tier chips (All / Loved it / It was fine / Didn't like it,
+  each with a tier-color dot doubling as a legend; selected chip lights up manila). Chip +
+  search + sort stack (AND); author filtering is via the search box (no separate author
+  control). "By score" shows the grouped ranked drawers; every other sort flattens into one
+  cross-catalog list where cards keep their tier color + true score. View-only by
+  construction: each card derives rank/score from the store BY ID, never from display order
+  — nothing writes to store. Date sort is month-precision (stored date is "Mon YYYY");
   exact-day sorting deferred to P2b. Filing a NEW book auto-resets filters so it's visible
   (re-ranks keep the current view). View state is transient (not persisted).
+  (Internal note: the "By score" sort value is `"score"`; the tier FILTER is `view.tier`.)
 - **Next up: P2b (optional genre/tags)** — see PRD Section 7 + Section 9. This is a SCHEMA
   change: add `genres: string[]`, migrate existing books to `[]`, consider bumping the key
   to `the-stacks-v2`. Fold in the stored-date field here too (enables exact-day sort in P2a).
