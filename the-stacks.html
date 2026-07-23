@@ -295,6 +295,43 @@
   .chip[data-tier="disliked"]{--dot:var(--brick)}
   .chip.active{background:var(--card); color:var(--ink); border-color:var(--card)}
 
+  /* ---- Genres (card tags + tag picker in the modal) ---- */
+  .gtags{grid-column:1/-1; display:flex; flex-wrap:wrap; gap:6px; margin-top:8px}
+  .gtag{
+    font-size:11px; font-weight:700; letter-spacing:.5px; text-transform:uppercase;
+    color:var(--ink-soft); background:var(--card-2); border:1px solid var(--card-edge);
+    border-radius:999px; padding:3px 9px;
+  }
+  .gsection{margin-bottom:16px}
+  .gsection-lab{display:block; font-size:12px; text-transform:uppercase; letter-spacing:1px; color:var(--ink-soft); margin-bottom:6px}
+  .gchips{
+    display:flex; flex-wrap:wrap; gap:8px;
+    max-height:150px; overflow-y:auto;
+    padding:10px; background:var(--card-2);
+    border:1px solid var(--card-edge); border-radius:var(--radius);
+  }
+  .gchip{
+    font-family:"Space Mono",monospace; font-size:12px; font-weight:700; letter-spacing:.3px;
+    cursor:pointer; background:transparent; color:var(--ink-soft);
+    border:1px solid var(--card-edge); border-radius:999px; padding:6px 12px;
+    transition:background .1s ease, color .1s ease, border-color .1s ease;
+  }
+  .gchip:hover{border-color:var(--ink-soft); color:var(--ink)}
+  .gchip.on{background:var(--stamp); color:var(--card); border-color:var(--stamp)}
+  .gchip:focus-visible{outline:2px solid var(--stamp); outline-offset:2px}
+  .gchip:disabled{opacity:.4; cursor:default}
+  .gchip:disabled:hover{border-color:var(--card-edge); color:var(--ink-soft)}
+  .gadd{display:flex; gap:8px; margin-top:10px}
+  .gadd-input{
+    flex:1 1 auto; min-width:0; font-family:"Space Mono",monospace; font-size:14px; color:var(--ink);
+    background:var(--card-2); border:1px solid var(--card-edge); border-radius:var(--radius); padding:9px 11px;
+  }
+  .gadd-input::placeholder{color:var(--ink-faint)}
+  .gadd-input:focus{outline:2px solid var(--stamp); outline-offset:1px; border-color:var(--stamp)}
+  .gadd-btn{flex:0 0 auto; padding:9px 16px}
+  .gadd-input:disabled, .gadd-btn:disabled{opacity:.5; cursor:not-allowed}
+  .ghint{font-size:12px; color:var(--ink-faint); margin-top:8px}
+
   @media (max-width:520px){
     .brand h1{font-size:30px}
     .versus{grid-template-columns:1fr}
@@ -358,13 +395,19 @@
   "use strict";
 
   // ---- Config ----
-  const KEY = "the-stacks-v1";
+  const KEY = "the-stacks-v2";       // current schema (books have genres[] + finishedOn)
+  const KEY_V1 = "the-stacks-v1";    // previous schema; kept untouched on disk as a fallback
   const TIERS = ["loved","fine","disliked"];
   const TIER_META = {
     loved:    { label:"Loved it",      band:[7.0,10.0], sub:"couldn't stop thinking about it" },
     fine:     { label:"It was fine",   band:[4.0, 6.9], sub:"read it, no regrets, no fireworks" },
     disliked: { label:"Didn't like it",band:[1.0, 3.9], sub:"a slog, or just not for me" }
   };
+  // Month name -> 0-based index (used by both the migration and the date sort).
+  const MONTHS = {jan:0,feb:1,mar:2,apr:3,may:4,jun:5,jul:6,aug:7,sep:8,oct:9,nov:10,dec:11};
+  // Suggested genres shown as chips; the reader's own genres get added to these on the fly.
+  const STARTER_GENRES = ["Literary Fiction","Fantasy","Sci-Fi","Mystery & Thriller","Romance","Horror","Poetry","Historical","Nonfiction","Memoir","Science","Philosophy"];
+  const MAX_GENRES = 3; // a book can carry at most this many genres
 
   // ---- State ----
   let store = load();
@@ -373,12 +416,49 @@
   const DEFAULT_VIEW = { query:"", sort:"score", tier:"all" };
   let view = Object.assign({}, DEFAULT_VIEW);
 
+  function emptyStore(){ return { books:{}, rankings:{loved:[],fine:[],disliked:[]} }; }
+  function isValidShape(s){ return s && s.books && s.rankings; }
+
+  // Derive a sortable "YYYY-MM-DD" from an old display date like "Jul 2026".
+  // Best-effort at month precision (day defaults to 01); returns "" if unparseable.
+  function isoFromDisplay(s){
+    const m = (s||"").trim().toLowerCase().match(/^([a-z]{3})[a-z]*\s+(\d{4})$/);
+    if(!m || !(m[1] in MONTHS)) return "";
+    return m[2] + "-" + String(MONTHS[m[1]]+1).padStart(2,"0") + "-01";
+  }
+
+  // Upgrade any store to the current schema: every book gets genres[] and finishedOn.
+  // Additive only — existing fields are never removed or changed. Idempotent (safe to
+  // run on already-migrated data), so it also self-heals partial records.
+  function migrate(s){
+    if(!isValidShape(s)) return s;
+    Object.keys(s.books).forEach(id=>{
+      const b = s.books[id];
+      if(!Array.isArray(b.genres)) b.genres = [];
+      if(!b.finishedOn) b.finishedOn = isoFromDisplay(b.dateFinished);
+    });
+    return s;
+  }
+
+  // Load order: current v2 key first; else migrate a COPY of the old v1 data into v2
+  // (leaving v1 untouched on disk as a fallback); else start empty.
   function load(){
     try{
-      const raw = localStorage.getItem(KEY);
-      if(raw){ const s = JSON.parse(raw); if(s.books && s.rankings) return s; }
+      const rawV2 = localStorage.getItem(KEY);
+      if(rawV2){ const s = JSON.parse(rawV2); if(isValidShape(s)) return migrate(s); }
     }catch(e){}
-    return { books:{}, rankings:{loved:[],fine:[],disliked:[]} };
+    try{
+      const rawV1 = localStorage.getItem(KEY_V1);
+      if(rawV1){
+        const old = JSON.parse(rawV1);
+        if(isValidShape(old)){
+          const upgraded = migrate(old);
+          try{ localStorage.setItem(KEY, JSON.stringify(upgraded)); }catch(e){}
+          return upgraded; // v1 string is left in place as a fallback
+        }
+      }
+    }catch(e){}
+    return emptyStore();
   }
   function save(){
     try{ localStorage.setItem(KEY, JSON.stringify(store)); }
@@ -427,12 +507,11 @@
     return (b.title||"").toLowerCase().includes(q) || (b.author||"").toLowerCase().includes(q);
   }
 
-  // Month-precision sort key from a "Mon YYYY" date string; unknown -> -Infinity.
-  const MONTHS = {jan:0,feb:1,mar:2,apr:3,may:4,jun:5,jul:6,aug:7,sep:8,oct:9,nov:10,dec:11};
-  function dateKey(b){
-    const m = (b.dateFinished||"").trim().toLowerCase().match(/^([a-z]{3})[a-z]*\s+(\d{4})$/);
-    if(!m || !(m[1] in MONTHS)) return -Infinity;
-    return parseInt(m[2],10)*12 + MONTHS[m[1]];
+  // Sortable date for a book: prefer the precise finishedOn ("YYYY-MM-DD"), else derive
+  // one from the "Mon YYYY" display string. ISO date strings compare chronologically as
+  // plain text. Returns "" when there's no usable date (those sort last).
+  function dateSortKey(b){
+    return b.finishedOn || isoFromDisplay(b.dateFinished) || "";
   }
 
   // Ids passing the current tier + author + search filters, in tier/rank order.
@@ -464,11 +543,11 @@
     if(view.sort==="newest" || view.sort==="oldest"){
       const dir = view.sort==="newest" ? -1 : 1;
       return arr.sort((a,b)=>{
-        const ka=dateKey(store.books[a]), kb=dateKey(store.books[b]);
+        const ka=dateSortKey(store.books[a]), kb=dateSortKey(store.books[b]);
         if(ka===kb) return byTitle(a,b);
-        if(ka===-Infinity) return 1;         // undated last, both directions
-        if(kb===-Infinity) return -1;
-        return (ka-kb)*dir;
+        if(!ka) return 1;                    // undated last, both directions
+        if(!kb) return -1;
+        return (ka < kb ? -1 : 1) * dir;     // ISO date strings compare chronologically
       });
     }
     return arr;
@@ -560,10 +639,67 @@
       '<div class="stamp"><span class="num">'+score+'</span>'+
         '<span class="rank">#'+(info.index+1)+' of '+info.n+'</span></div>'+
       '<div class="meta">'+metaBits.join(" · ")+'</div>'+
+      (Array.isArray(b.genres)&&b.genres.length ? '<div class="gtags">'+b.genres.map(g=>'<span class="gtag">'+esc(g)+'</span>').join("")+'</div>' : "")+
       (b.takeaway ? '<div class="note">“'+esc(b.takeaway)+'”</div>' : "");
     c.onclick = ()=>openDetail(id);
     c.onkeydown = (e)=>{ if(e.key==="Enter"||e.key===" "){ e.preventDefault(); openDetail(id); } };
     return c;
+  }
+
+  // ---- Genres (tag picker shared by the add flow and the detail view) ----
+  function hasGenre(list, g){ return (list||[]).some(x=> x.toLowerCase()===g.toLowerCase()); }
+  function usedGenres(){
+    const map = new Map(); // lowercase -> canonical spelling actually stored
+    TIERS.forEach(t=> store.rankings[t].forEach(id=>{
+      (store.books[id].genres||[]).forEach(g=>{ const k=g.toLowerCase(); if(!map.has(k)) map.set(k,g); });
+    }));
+    return [...map.values()];
+  }
+  // Chip options: starter set first, then the reader's own genres (in use or currently
+  // selected) alphabetically, deduped case-insensitively.
+  function genreOptions(selected){
+    const seen = new Set(); const out = [];
+    const push = g => { const k=(g||"").toLowerCase(); if(k && !seen.has(k)){ seen.add(k); out.push(g); } };
+    STARTER_GENRES.forEach(push);
+    usedGenres().concat(selected||[]).sort((a,b)=>a.localeCompare(b, undefined, {sensitivity:"base"})).forEach(push);
+    return out;
+  }
+  function toggleGenre(g){
+    if(hasGenre(flow.genres, g)) flow.genres = flow.genres.filter(x=> x.toLowerCase()!==g.toLowerCase());
+    else if(flow.genres.length < MAX_GENRES) flow.genres.push(g);   // ignore adds past the cap
+  }
+  function addCustomGenre(raw){
+    if(flow.genres.length >= MAX_GENRES) return;
+    const g = (raw||"").trim().replace(/\s+/g," ");
+    if(!g) return;
+    const match = genreOptions(flow.genres).find(o=> o.toLowerCase()===g.toLowerCase());
+    const canonical = match || g;               // reuse an existing spelling to avoid near-dupes
+    if(!hasGenre(flow.genres, canonical)) flow.genres.push(canonical);
+  }
+  // Fills #genreBox from flow.genres and re-renders itself on toggle/add, so a just-added
+  // custom genre immediately shows up as a reusable chip.
+  function renderGenreBox(){
+    const box = document.getElementById("genreBox");
+    if(!box) return;
+    const atLimit = flow.genres.length >= MAX_GENRES;
+    let html = '<div class="gchips">';
+    genreOptions(flow.genres).forEach(g=>{
+      const on = hasGenre(flow.genres, g);
+      const dis = (!on && atLimit) ? " disabled" : ""; // at the cap, only selected chips stay tappable
+      html += '<button type="button" class="gchip'+(on?" on":"")+'"'+dis+' data-g="'+esc(g)+'" aria-pressed="'+(on?"true":"false")+'">'+esc(g)+'</button>';
+    });
+    html += '</div>'+
+      (atLimit ? '<div class="ghint">'+MAX_GENRES+' genres max — remove one to add another.</div>' : '')+
+      '<div class="gadd">'+
+        '<input type="text" id="gInput" class="gadd-input" placeholder="'+(atLimit?"At the "+MAX_GENRES+"-genre limit":"Add your own…")+'"'+(atLimit?" disabled":"")+' aria-label="Add a custom genre" autocomplete="off">'+
+        '<button type="button" class="btn ghost gadd-btn" id="gAdd"'+(atLimit?" disabled":"")+'>Add</button>'+
+      '</div>';
+    box.innerHTML = html;
+    box.querySelectorAll(".gchip").forEach(ch=>{ ch.onclick = ()=>{ toggleGenre(ch.dataset.g); renderGenreBox(); }; });
+    const input = document.getElementById("gInput");
+    const add = ()=>{ addCustomGenre(input.value); input.value=""; renderGenreBox(); document.getElementById("gInput").focus(); };
+    document.getElementById("gAdd").onclick = add;
+    input.onkeydown = (e)=>{ if(e.key==="Enter"){ e.preventDefault(); add(); } };
   }
 
   // ---- Modal plumbing ----
@@ -576,7 +712,7 @@
 
   // ---- Add flow ----
   function openAdd(){
-    flow = { mode:"add", step:"meta", title:"", author:"", takeaway:"", tier:null };
+    flow = { mode:"add", step:"meta", title:"", author:"", takeaway:"", tier:null, genres:[] };
     renderFlow(); openModal();
   }
   document.getElementById("addBtn").onclick = openAdd;
@@ -597,10 +733,13 @@
       '<label class="fld"><span>Author</span><input id="f-author" value="'+esc(flow.author)+'" autocomplete="off"></label>'+
       '<label class="fld"><span>A line to remember it by — optional</span>'+
         '<textarea id="f-take" rows="2" placeholder="one thought, a favorite quote, why it stuck">'+esc(flow.takeaway)+'</textarea></label>'+
+      '<div class="gsection"><span class="gsection-lab">Genres — optional (up to '+MAX_GENRES+')</span><div id="genreBox"></div></div>'+
       '<div class="row">'+
         '<button class="btn ghost" id="f-cancel">Cancel</button>'+
         '<button class="btn primary" id="f-next">Next</button>'+
       '</div>';
+    if(!Array.isArray(flow.genres)) flow.genres = [];
+    renderGenreBox();
     const titleInput = document.getElementById("f-title");
     titleInput.focus();
     document.getElementById("f-cancel").onclick = closeModal;
@@ -689,10 +828,14 @@
       store.rankings[old] = store.rankings[old].filter(x => x !== id);
       store.books[id].tier = flow.tier;
     } else {
+      const now = new Date();
+      const iso = now.getFullYear() + "-" + String(now.getMonth()+1).padStart(2,"0") + "-" + String(now.getDate()).padStart(2,"0");
       id = "b" + Date.now().toString(36) + Math.floor(Math.random()*1e4).toString(36);
       store.books[id] = {
-        id, title:flow.title, author:flow.author, takeaway:flow.takeaway,
-        tier:flow.tier, dateFinished: new Date().toLocaleDateString("en-US",{month:"short",year:"numeric"})
+        id, title:flow.title, author:flow.author, takeaway:flow.takeaway, tier:flow.tier,
+        genres: Array.isArray(flow.genres) ? flow.genres : [],
+        dateFinished: now.toLocaleDateString("en-US",{month:"short",year:"numeric"}),
+        finishedOn: iso
       };
     }
     const arr = store.rankings[flow.tier];
@@ -729,7 +872,7 @@
 
   // ---- Detail / edit / remove ----
   function openDetail(id){
-    flow = { mode:"detail", id };
+    flow = { mode:"detail", id, genres:(store.books[id].genres||[]).slice() };
     renderDetail(); openModal();
   }
   function renderDetail(){
@@ -750,13 +893,15 @@
         ' <button type="button" class="inline-act" id="d-rerank">Re-rank</button></div>'+
       '<label class="fld"><span>A line to remember it by</span>'+
         '<textarea id="d-take" rows="3" placeholder="add a thought or favorite quote">'+esc(b.takeaway||"")+'</textarea></label>'+
+      '<div class="gsection"><span class="gsection-lab">Genres (up to '+MAX_GENRES+')</span><div id="genreBox"></div></div>'+
       '<div class="row detail-actions">'+
         '<button type="button" class="removelink" id="d-remove">Remove from catalog</button>'+
         '<span class="detail-actions-main">'+
           '<button class="btn ghost" id="d-close">Close</button>'+
-          '<button class="btn primary" id="d-save">Save note</button>'+
+          '<button class="btn primary" id="d-save">Save</button>'+
         '</span>'+
       '</div>';
+    renderGenreBox();
     document.getElementById("d-close").onclick = closeModal;
     document.getElementById("d-rerank").onclick = ()=>{
       const rb = store.books[id];
@@ -768,6 +913,7 @@
     };
     document.getElementById("d-save").onclick = ()=>{
       store.books[id].takeaway = document.getElementById("d-take").value.trim();
+      store.books[id].genres = flow.genres.slice();
       save(); const hl=id; closeModal(); render(hl);
     };
     document.getElementById("d-remove").onclick = ()=>{
@@ -874,7 +1020,7 @@
       '</div>';
     document.getElementById("ic-cancel").onclick = closeModal;
     document.getElementById("ic-confirm").onclick = ()=>{
-      store = data; save(); closeModal(); render();
+      store = migrate(data); save(); closeModal(); render(); // upgrade old backups too
     };
     openModal();
     document.getElementById("ic-cancel").focus();

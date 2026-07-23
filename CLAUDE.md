@@ -29,9 +29,10 @@ Full requirements are in `PRD-the-stacks.md` — read it before any non-trivial 
   (the two linked Google Fonts are the only exception). Must run by opening the file.
 - Preserve the data model, scoring formula, and placement algorithm documented in the
   PRD (Sections 4.3–4.5). If a change adds fields, migrate existing data; never wipe it.
-- localStorage key is `"the-stacks-v1"` (localStorage = a small storage area in the browser
-  where the app keeps your data on your own device). Don't change it silently; if the schema
-  version changes, bump the key deliberately and migrate old data.
+- localStorage key is `"the-stacks-v2"` (localStorage = a small storage area in the browser
+  where the app keeps your data on your own device). The old `"the-stacks-v1"` key is kept
+  untouched on disk as a fallback. Don't change the key silently; if the schema version
+  changes again, bump it deliberately and migrate old data (v2 was the first such bump).
 - Maintain the accessibility/quality floor: mobile responsive, visible keyboard focus,
   reduced-motion respected, user input escaped (Section 4.6).
 - Match the existing card-catalog visual system and CSS variables. New UI should look like
@@ -73,8 +74,21 @@ key, scoring formula, quality floor all present).
   exact-day sorting deferred to P2b. Filing a NEW book auto-resets filters so it's visible
   (re-ranks keep the current view). View state is transient (not persisted).
   (Internal note: the "By score" sort value is `"score"`; the tier FILTER is `view.tier`.)
-- **Next up: P2b (optional genre/tags)** — see PRD Section 7 + Section 9. This is a SCHEMA
-  change: add `genres: string[]`, migrate existing books to `[]`, consider bumping the key
-  to `the-stacks-v2`. Fold in the stored-date field here too (enables exact-day sort in P2a).
-- **Then: P3 (personal insights)** — only meaningful at ~15+ books.
-- Reminder: user still to run the real-browser QA pass on the above.
+- **P2b (optional genre/tags) — DONE.** First SCHEMA change. Key bumped `the-stacks-v1`
+  → `the-stacks-v2`; `load()` migrates a COPY of v1 into v2 and leaves v1 untouched as a
+  fallback (import runs the same `migrate()`). Two fields added to each book:
+  `genres: string[]` and `finishedOn: "YYYY-MM-DD"` (migrated books get `[]` and a
+  best-effort first-of-month date; new books capture today's exact day). `migrate()` is
+  additive + idempotent. Genre picker (shared by add-flow Step 1 + detail view): chips =
+  starter set ∪ the reader's own used/selected genres (deduped case-insensitively), tap to
+  toggle, plus an "add your own" box whose entries flow back into the suggestions (custom
+  genre drops off only when no book uses it — Option A). **Max 3 genres/book** (`MAX_GENRES`);
+  at the cap, unselected chips + the add box disable and a hint shows. Chip list is a
+  capped (150px) scrollable box so the modal stays short. Tags show as pills on the card.
+  Date sort now prefers `finishedOn` (day-precise) and falls back to month for old books.
+  Online genre auto-suggest was considered and DEFERRED (needs external API; breaks
+  offline/privacy) — see the memory note `roadmap-online-genre-autosuggest`.
+- **Next up: P3 (personal insights)** — only meaningful at ~15+ books; genres now exist to
+  slice by (distribution across tiers; most-read vs highest-rated genres; gentle
+  "comfort zone" observation). See PRD Section 7.
+- Reminder: user still to run the real-browser QA pass (export a backup first).
