@@ -85,7 +85,12 @@ key, scoring formula, quality floor all present).
   genre drops off only when no book uses it — Option A). **Max 3 genres/book** (`MAX_GENRES`);
   at the cap, unselected chips + the add box disable and a hint shows. Chip list is a
   capped (150px) scrollable box so the modal stays short. Tags show as pills on the card.
-  Date sort now prefers `finishedOn` (day-precise) and falls back to month for old books.
+  Chip matching is case/space/punctuation-insensitive (`gkey()` strips non-alphanumerics),
+  so "sci fi"/"Sci-Fi" collapse to one genre. Chips are ordered MOST-USED first (ties
+  alphabetical). Typing a custom genre close to an existing one shows a "Did you mean …?"
+  nudge (Levenshtein-based) that suggests rather than silently merges — accept it, or keep
+  your own spelling. Date sort now prefers `finishedOn` (day-precise) and falls back to
+  month for old books.
   Online genre auto-suggest was considered and DEFERRED (needs external API; breaks
   offline/privacy) — see the memory note `roadmap-online-genre-autosuggest`.
 - **Next up: P3 (personal insights)** — only meaningful at ~15+ books; genres now exist to

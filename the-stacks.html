@@ -331,6 +331,12 @@
   .gadd-btn{flex:0 0 auto; padding:9px 16px}
   .gadd-input:disabled, .gadd-btn:disabled{opacity:.5; cursor:not-allowed}
   .ghint{font-size:12px; color:var(--ink-faint); margin-top:8px}
+  .gsuggest{font-size:13px; color:var(--ink-soft); margin-top:10px; line-height:1.5}
+  .glink{background:transparent; border:none; padding:0; cursor:pointer; font-family:inherit; font-size:13px; font-weight:700; color:var(--stamp); text-decoration:underline}
+  .glink:hover{color:#853A2D}
+  .glink.alt{color:var(--ink-soft)}
+  .glink.alt:hover{color:var(--ink)}
+  .glink:focus-visible{outline:2px solid var(--stamp); outline-offset:2px; border-radius:2px}
 
   @media (max-width:520px){
     .brand h1{font-size:30px}
@@ -647,37 +653,74 @@
   }
 
   // ---- Genres (tag picker shared by the add flow and the detail view) ----
-  function hasGenre(list, g){ return (list||[]).some(x=> x.toLowerCase()===g.toLowerCase()); }
+  // Match key: case-, space-, and punctuation-insensitive, so "Sci-Fi", "sci fi" and
+  // "scifi" all collapse to the same genre.
+  function gkey(g){ return (g||"").toLowerCase().replace(/[^a-z0-9]+/g,""); }
+  function hasGenre(list, g){ const k=gkey(g); return (list||[]).some(x=> gkey(x)===k); }
+  function addGenre(g){ if(flow.genres.length < MAX_GENRES && !hasGenre(flow.genres, g)) flow.genres.push(g); }
   function usedGenres(){
-    const map = new Map(); // lowercase -> canonical spelling actually stored
+    const map = new Map(); // gkey -> canonical spelling actually stored
     TIERS.forEach(t=> store.rankings[t].forEach(id=>{
-      (store.books[id].genres||[]).forEach(g=>{ const k=g.toLowerCase(); if(!map.has(k)) map.set(k,g); });
+      (store.books[id].genres||[]).forEach(g=>{ const k=gkey(g); if(!map.has(k)) map.set(k,g); });
     }));
     return [...map.values()];
   }
-  // Chip options: starter set first, then the reader's own genres (in use or currently
-  // selected) alphabetically, deduped case-insensitively.
+  function genreCounts(){
+    const counts = new Map(); // gkey -> how many books use it
+    TIERS.forEach(t=> store.rankings[t].forEach(id=>{
+      (store.books[id].genres||[]).forEach(g=>{ const k=gkey(g); counts.set(k,(counts.get(k)||0)+1); });
+    }));
+    return counts;
+  }
+  // Chip options: starter set + the reader's own genres (used or selected), deduped, then
+  // ordered MOST-USED first (ties alphabetical) so frequent genres sit at the top.
   function genreOptions(selected){
-    const seen = new Set(); const out = [];
-    const push = g => { const k=(g||"").toLowerCase(); if(k && !seen.has(k)){ seen.add(k); out.push(g); } };
+    const seen = new Set(); const list = [];
+    const push = g => { const k=gkey(g); if(k && !seen.has(k)){ seen.add(k); list.push(g); } };
     STARTER_GENRES.forEach(push);
-    usedGenres().concat(selected||[]).sort((a,b)=>a.localeCompare(b, undefined, {sensitivity:"base"})).forEach(push);
-    return out;
+    usedGenres().forEach(push);
+    (selected||[]).forEach(push);
+    const counts = genreCounts();
+    return list.sort((a,b)=>{
+      const ca=counts.get(gkey(a))||0, cb=counts.get(gkey(b))||0;
+      return cb!==ca ? cb-ca : a.localeCompare(b, undefined, {sensitivity:"base"});
+    });
   }
   function toggleGenre(g){
-    if(hasGenre(flow.genres, g)) flow.genres = flow.genres.filter(x=> x.toLowerCase()!==g.toLowerCase());
+    const k=gkey(g);
+    if(flow.genres.some(x=> gkey(x)===k)) flow.genres = flow.genres.filter(x=> gkey(x)!==k);
     else if(flow.genres.length < MAX_GENRES) flow.genres.push(g);   // ignore adds past the cap
   }
-  function addCustomGenre(raw){
-    if(flow.genres.length >= MAX_GENRES) return;
-    const g = (raw||"").trim().replace(/\s+/g," ");
-    if(!g) return;
-    const match = genreOptions(flow.genres).find(o=> o.toLowerCase()===g.toLowerCase());
-    const canonical = match || g;               // reuse an existing spelling to avoid near-dupes
-    if(!hasGenre(flow.genres, canonical)) flow.genres.push(canonical);
+  // Levenshtein edit distance — how many single-character edits turn one string into another.
+  function editDistance(a,b){
+    const m=a.length, n=b.length;
+    if(!m) return n; if(!n) return m;
+    let prev=[...Array(n+1).keys()], cur=new Array(n+1);
+    for(let i=1;i<=m;i++){
+      cur[0]=i;
+      for(let j=1;j<=n;j++){
+        const cost = a[i-1]===b[j-1] ? 0 : 1;
+        cur[j]=Math.min(prev[j]+1, cur[j-1]+1, prev[j-1]+cost);
+      }
+      const t=prev; prev=cur; cur=t;
+    }
+    return prev[n];
   }
-  // Fills #genreBox from flow.genres and re-renders itself on toggle/add, so a just-added
-  // custom genre immediately shows up as a reusable chip.
+  // Closest existing option to a typed genre (by normalized edit distance) — powers the
+  // "did you mean?" nudge. Returns null unless something is genuinely close (a likely typo).
+  function nearestGenre(typed){
+    const kt=gkey(typed); if(!kt) return null;
+    let best=null, bestD=Infinity;
+    genreOptions(flow.genres).forEach(o=>{
+      const ko=gkey(o); if(ko===kt) return;
+      const d=editDistance(kt,ko);
+      if(d<bestD){ bestD=d; best=o; }
+    });
+    const thresh = kt.length<=4 ? 1 : 2;
+    return (best && bestD>0 && bestD<=thresh) ? best : null;
+  }
+  // Fills #genreBox from flow.genres and re-renders on any change, so a just-added custom
+  // genre immediately becomes a reusable chip.
   function renderGenreBox(){
     const box = document.getElementById("genreBox");
     if(!box) return;
@@ -693,13 +736,28 @@
       '<div class="gadd">'+
         '<input type="text" id="gInput" class="gadd-input" placeholder="'+(atLimit?"At the "+MAX_GENRES+"-genre limit":"Add your own…")+'"'+(atLimit?" disabled":"")+' aria-label="Add a custom genre" autocomplete="off">'+
         '<button type="button" class="btn ghost gadd-btn" id="gAdd"'+(atLimit?" disabled":"")+'>Add</button>'+
-      '</div>';
+      '</div>'+
+      (flow.gSuggest ? '<div class="gsuggest">Did you mean <button type="button" class="glink" id="gUse">'+esc(flow.gSuggest.suggestion)+'</button>?'+
+        ' <button type="button" class="glink alt" id="gKeep">Add “'+esc(flow.gSuggest.typed)+'” instead</button></div>' : '');
     box.innerHTML = html;
-    box.querySelectorAll(".gchip").forEach(ch=>{ ch.onclick = ()=>{ toggleGenre(ch.dataset.g); renderGenreBox(); }; });
+    const focusInput = ()=>{ const gi=document.getElementById("gInput"); if(gi && !gi.disabled) gi.focus(); };
+    box.querySelectorAll(".gchip").forEach(ch=>{ ch.onclick = ()=>{ flow.gSuggest=null; toggleGenre(ch.dataset.g); renderGenreBox(); }; });
     const input = document.getElementById("gInput");
-    const add = ()=>{ addCustomGenre(input.value); input.value=""; renderGenreBox(); document.getElementById("gInput").focus(); };
+    const add = ()=>{
+      const g = (input.value||"").trim().replace(/\s+/g," ");
+      if(!g) return;
+      const exact = genreOptions(flow.genres).find(o=> gkey(o)===gkey(g)); // formatting/case variant
+      if(exact){ addGenre(exact); flow.gSuggest=null; renderGenreBox(); focusInput(); return; }
+      const near = nearestGenre(g);
+      if(near){ flow.gSuggest = { typed:g, suggestion:near }; renderGenreBox(); return; } // suggest, don't silently merge
+      addGenre(g); flow.gSuggest=null; renderGenreBox(); focusInput();
+    };
     document.getElementById("gAdd").onclick = add;
     input.onkeydown = (e)=>{ if(e.key==="Enter"){ e.preventDefault(); add(); } };
+    if(flow.gSuggest){
+      document.getElementById("gUse").onclick = ()=>{ addGenre(flow.gSuggest.suggestion); flow.gSuggest=null; renderGenreBox(); focusInput(); };
+      document.getElementById("gKeep").onclick = ()=>{ addGenre(flow.gSuggest.typed); flow.gSuggest=null; renderGenreBox(); focusInput(); };
+    }
   }
 
   // ---- Modal plumbing ----
