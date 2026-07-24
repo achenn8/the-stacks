@@ -56,6 +56,10 @@ key, scoring formula, quality floor all present).
   tier (keep or move), re-run comparisons excluding the book itself, note/metadata kept,
   nothing written until finished (cancel-safe).
 - **Polish (off-backlog, DONE):**
+  - **Edit title/author from the detail view** (PRD nice-to-have): both are inline-editable
+    inputs in the detail header (dashed underline = editable; blank author shows an "Add
+    author" placeholder). Save persists them with the note/genres; title stays required.
+    No schema change (fields already existed).
   - Remove control de-emphasized to a quiet "Remove from catalog" link, separated from
     Close/Save; keeps the two-step "Really remove?" confirm.
   - **"Too close to call" button removed** — a deliberate deviation from PRD §4.1/§4.5.

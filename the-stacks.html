@@ -205,6 +205,20 @@
   .detail-stamp .rank{display:block; font-size:11px; color:var(--ink-faint); text-transform:uppercase; letter-spacing:1px; margin-top:6px}
   .filed{font-size:13px; color:var(--ink-soft); margin:14px 0 20px; text-transform:uppercase; letter-spacing:1px}
   .filed b{color:var(--ink)}
+  /* editable title/author in the detail header (dashed underline = editable) */
+  .d-title-input{
+    font-family:"Bitter",serif; font-weight:500; font-size:23px; color:var(--ink);
+    background:transparent; border:none; border-bottom:1px dashed var(--card-edge);
+    width:100%; padding:2px 0; margin:0;
+  }
+  .d-author-input{
+    font-family:"Space Mono",monospace; font-size:11px; text-transform:uppercase; letter-spacing:1px;
+    color:var(--ink-soft); background:transparent; border:none; border-bottom:1px dashed var(--card-edge);
+    width:100%; padding:3px 0; margin-top:6px;
+  }
+  .d-author-input::placeholder{color:var(--ink-faint)}
+  .d-title-input:focus-visible, .d-author-input:focus-visible{outline:2px solid var(--stamp); outline-offset:3px; border-bottom-color:transparent}
+  .d-date{font-size:11px; text-transform:uppercase; letter-spacing:1px; color:var(--ink-faint); margin-top:6px}
   /* inline "Re-rank" action on the Filed line */
   .inline-act{
     font-family:"Space Mono",monospace; font-size:11px; font-weight:700;
@@ -940,10 +954,13 @@
     const rank = arr.indexOf(id) + 1;
     const score = scoreOf(id).toFixed(1);
     sheet.innerHTML =
+      '<h2 id="sheetTitle" style="position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)">Book details</h2>'+
       '<div class="detail-head">'+
-        '<div><h2 id="sheetTitle" style="margin-bottom:2px">'+esc(b.title)+'</h2>'+
-          '<div class="step-tag" style="margin:0">'+(b.author?esc(b.author):"Unknown author")+
-          (b.dateFinished?' · '+b.dateFinished:"")+'</div></div>'+
+        '<div style="flex:1; min-width:0">'+
+          '<input id="d-title" class="d-title-input" value="'+esc(b.title)+'" aria-label="Title" autocomplete="off">'+
+          '<input id="d-author" class="d-author-input" value="'+esc(b.author||"")+'" placeholder="Add author" aria-label="Author" autocomplete="off">'+
+          (b.dateFinished ? '<div class="d-date">'+esc(b.dateFinished)+'</div>' : '')+
+        '</div>'+
         '<div class="detail-stamp"><span class="num">'+score+'</span>'+
           '<span class="rank">#'+rank+' of '+arr.length+'</span></div>'+
       '</div>'+
@@ -970,6 +987,11 @@
       renderFlow();
     };
     document.getElementById("d-save").onclick = ()=>{
+      const titleEl = document.getElementById("d-title");
+      const t = titleEl.value.trim();
+      if(!t){ titleEl.focus(); titleEl.style.borderBottom = "1px solid var(--stamp)"; return; } // title required
+      store.books[id].title = t;
+      store.books[id].author = document.getElementById("d-author").value.trim();
       store.books[id].takeaway = document.getElementById("d-take").value.trim();
       store.books[id].genres = flow.genres.slice();
       save(); const hl=id; closeModal(); render(hl);
