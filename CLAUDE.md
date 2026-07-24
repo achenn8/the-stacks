@@ -93,7 +93,20 @@ key, scoring formula, quality floor all present).
   month for old books.
   Online genre auto-suggest was considered and DEFERRED (needs external API; breaks
   offline/privacy) — see the memory note `roadmap-online-genre-autosuggest`.
-- **Next up: P3 (personal insights)** — only meaningful at ~15+ books; genres now exist to
-  slice by (distribution across tiers; most-read vs highest-rated genres; gentle
-  "comfort zone" observation). See PRD Section 7.
+- **Next up: P3 (personal insights) — PLANNED, waiting on data.** User is logging books
+  toward ~15 before we build (insights are noise on a small catalog). **Decided:** button
+  label is **"Insights"**; the data threshold is **10 books** (below it, show a friendly
+  "log a few more" state, not numbers). Agreed design (matches a mockup shown 2026-07-24):
+  a quiet "Insights" button in the FOOTER (left side; Export/Import stay right) opens the
+  existing modal showing —
+  1. **Tier split** — how many Loved/Fine/Disliked, as gold/sage/brick bars sized by share.
+  2. **Genres you read most** — top genres by count, as neutral bars.
+  3. **Genres you rate highest** — average score (`scoreOf`) per genre, shown ONLY for
+     genres with **≥3 books** (noise guard); reuse the "call number" stamp for the number.
+  4. **One gentle observation** line (e.g. "Most of your reading sits in two genres — X and
+     Y. You rate Z highest."), phrased as observation, never judgment.
+  If books exist but none are genre-tagged, show the tier split + a nudge to tag some.
+  READ-ONLY: computes from the store on open; no writes, no schema change, no effect on
+  scoring/ranking/search/genres. Keep the threshold + per-genre gate as tunable constants.
+  See PRD Section 7.
 - Reminder: user still to run the real-browser QA pass (export a backup first).
