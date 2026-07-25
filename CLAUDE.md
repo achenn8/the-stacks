@@ -112,5 +112,16 @@ key, scoring formula, quality floor all present).
   The 3 analysis headers are serif subheadings with dividers between them. READ-ONLY:
   computes from the store on open; no writes, no schema change. Both thresholds are tunable
   constants. See PRD Section 7.
-- **Backlog complete (P0–P3 + polish).** Nothing queued. Reminder: user still to run the
-  real-browser QA pass (export a backup first).
+- **Backlog complete (P0–P3 + polish).** Nothing queued for v1. Reminder: user still to run
+  the real-browser QA pass (export a backup first).
+
+## Deferred to v2 (not for v1)
+Two ideas parked with agreed designs — details in the auto-memory roadmap notes:
+- **Reorder the whole catalog by dragging.** Keep the 3 tiers; drag to reorder within a
+  tier and drag across a divider to re-tier; scores recompute on Done via `scoreFor`.
+  Build must add touch dragging + a keyboard fallback (quality floor). See memory
+  `roadmap-reorder-whole-catalog`.
+- **Online genre auto-suggest** (e.g. detect that "Crush" is Poetry). Needs an external
+  book-metadata API → breaks the offline/no-server/single-file constraints and the
+  privacy stance; for a future online version only. See memory
+  `roadmap-online-genre-autosuggest`.
