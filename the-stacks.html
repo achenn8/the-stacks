@@ -553,6 +553,16 @@
     const index = arr.indexOf(id);
     return { tier:b.tier, index, n:arr.length, score:scoreFor(index, arr.length, TIER_META[b.tier].band) };
   }
+  // Position across the whole catalog (loved best-first, then fine, then disliked).
+  function globalRank(id){
+    const b = store.books[id];
+    let r = 0;
+    for(const t of TIERS){
+      if(t === b.tier){ r += store.rankings[t].indexOf(id) + 1; break; }
+      r += store.rankings[t].length;
+    }
+    return r;
+  }
 
   function matchesQuery(b, q){
     if(!q) return true;
@@ -680,19 +690,20 @@
     const b = store.books[id];
     const info = rankInfo(id);
     const score = info.score.toFixed(1);
+    const gr = globalRank(id), tot = totalBooks();
     const c = document.createElement("div");
     c.className = "card" + (highlight ? " just-filed" : "");
     c.dataset.tier = info.tier; // sets the left-stripe color even outside a drawer
     c.tabIndex = 0;
     c.setAttribute("role","button");
     c.setAttribute("aria-label", b.title + ", " + TIER_META[info.tier].label +
-      ", call number " + score + ", rank " + (info.index+1) + " of " + info.n);
+      ", call number " + score + ", ranked " + gr + " of " + tot + " overall");
     const metaBits = [b.author ? esc(b.author) : "Unknown author"];
     if(b.dateFinished) metaBits.push(b.dateFinished);
     c.innerHTML =
       '<h3 class="title">'+esc(b.title)+'</h3>'+
       '<div class="stamp"><span class="num">'+score+'</span>'+
-        '<span class="rank">#'+(info.index+1)+' of '+info.n+'</span></div>'+
+        '<span class="rank">#'+gr+' of '+tot+'</span></div>'+
       '<div class="meta">'+metaBits.join(" · ")+'</div>'+
       (Array.isArray(b.genres)&&b.genres.length ? '<div class="gtags">'+b.genres.map(g=>'<span class="gtag">'+esc(g)+'</span>').join("")+'</div>' : "")+
       (b.takeaway ? '<div class="note">“'+esc(b.takeaway)+'”</div>' : "");
@@ -1069,8 +1080,7 @@
   function renderDetail(){
     const id = flow.id;
     const b = store.books[id];
-    const arr = store.rankings[b.tier];
-    const rank = arr.indexOf(id) + 1;
+    const rank = globalRank(id);
     const score = scoreOf(id).toFixed(1);
     sheet.innerHTML =
       '<h2 id="sheetTitle" style="position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)">Book details</h2>'+
@@ -1081,7 +1091,7 @@
           (b.dateFinished ? '<div class="d-date">'+esc(b.dateFinished)+'</div>' : '')+
         '</div>'+
         '<div class="detail-stamp"><span class="num">'+score+'</span>'+
-          '<span class="rank">#'+rank+' of '+arr.length+'</span></div>'+
+          '<span class="rank">#'+rank+' of '+totalBooks()+'</span></div>'+
       '</div>'+
       '<div class="filed">Filed under <b>'+TIER_META[b.tier].label+'</b>'+
         ' <button type="button" class="inline-act" id="d-rerank">Re-rank</button></div>'+
