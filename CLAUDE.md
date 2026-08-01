@@ -68,10 +68,15 @@ key, scoring formula, quality floor all present).
     resolves via the comparisons. (Scoring formula/data model unchanged.)
 - **P2a (findability — search, sort, filter) — DONE.** Toolbar under the header: search
   (title/author, live) + a Sort dropdown (By score default / Newest / Oldest / Title A–Z /
-  Author A–Z) + a row of tappable tier chips (All / Loved it / It was fine / Didn't like it,
-  each with a tier-color dot doubling as a legend; selected chip lights up manila). Chip +
-  search + sort stack (AND); author filtering is via the search box (no separate author
-  control). "By score" shows the grouped ranked drawers; every other sort flattens into one
+  Author A–Z) + tappable tier chips (Loved it / It was fine / Didn't like it, each with a
+  tier-color dot doubling as a legend; selected chip lights up manila). Tier chips **toggle**
+  — clicking the active one clears it back to all (there is no "All" chip; nothing selected =
+  all). A **Genre filter** chip ("Genre ▾") sits after the tier chips: opens a multi-select
+  popover of "genre (count)" rows ordered most-used first, with **Untagged (n)** at the
+  bottom, an OR across the selected genres, a Clear link, and a chip badge ("Genre" →
+  "Genre · Poetry" → "Genre · 2"); it hides entirely when no book has a genre. Search + tier
+  + genre stack (AND; genres OR among themselves); author filtering is via the search box (no
+  separate author control). "By score" shows the grouped ranked drawers; every other sort flattens into one
   cross-catalog list where cards keep their tier color + true score. View-only by
   construction: each card derives rank/score from the store BY ID, never from display order
   — nothing writes to store. Date sort is month-precision (stored date is "Mon YYYY");

@@ -313,6 +313,27 @@
   .chip[data-tier="fine"]{--dot:var(--sage)}
   .chip[data-tier="disliked"]{--dot:var(--brick)}
   .chip.active{background:var(--card); color:var(--ink); border-color:var(--card)}
+  /* genre filter: a chip that opens a multi-select popover */
+  .genre-filter{position:relative; display:inline-flex}
+  .genre-chip::after{content:"▾"; font-size:10px; opacity:.75}
+  .genre-pop{
+    position:absolute; top:calc(100% + 6px); left:0; z-index:40;
+    min-width:220px; max-width:calc(100vw - 40px); max-height:264px; overflow-y:auto;
+    background:var(--card); border:1px solid var(--card-edge); border-radius:var(--radius);
+    box-shadow:0 14px 34px rgba(0,0,0,.3); padding:6px;
+  }
+  .gopt{
+    display:flex; align-items:center; gap:10px; width:100%;
+    background:transparent; border:none; border-radius:var(--radius);
+    padding:8px 10px; cursor:pointer; text-align:left;
+  }
+  .gopt:hover, .gopt.on{background:var(--card-2)}
+  .gopt:focus-visible{outline:2px solid var(--stamp); outline-offset:-2px}
+  .gopt-check{flex:0 0 14px; width:14px; color:var(--stamp); font-weight:700; font-size:13px}
+  .gopt-name{flex:1 1 auto; min-width:0; font-family:"Bitter",serif; font-size:14px; color:var(--ink); white-space:nowrap; overflow:hidden; text-overflow:ellipsis}
+  .gopt.untagged .gopt-name{font-style:italic; color:var(--ink-soft)}
+  .gopt-n{flex:0 0 auto; font-family:"Space Mono",monospace; font-size:12px; color:var(--ink-faint); font-variant-numeric:tabular-nums}
+  .gopt-foot{border-top:1px solid var(--card-edge); margin-top:4px; padding-top:6px; text-align:right}
 
   /* ---- Genres (card tags + tag picker in the modal) ---- */
   .gtags{grid-column:1/-1; display:flex; flex-wrap:wrap; gap:6px; margin-top:8px}
@@ -415,11 +436,14 @@
         </select>
       </label>
     </div>
-    <div class="chips" id="tierChips" role="group" aria-label="Filter by tier">
-      <button type="button" class="chip" data-tier="all">All</button>
+    <div class="chips" id="tierChips" role="group" aria-label="Filter by tier and genre">
       <button type="button" class="chip" data-tier="loved">Loved it</button>
       <button type="button" class="chip" data-tier="fine">It was fine</button>
       <button type="button" class="chip" data-tier="disliked">Didn't like it</button>
+      <span class="genre-filter" id="genreFilter" hidden>
+        <button type="button" class="chip genre-chip" id="genreChip" aria-haspopup="true" aria-expanded="false">Genre</button>
+        <div class="genre-pop" id="genrePop" role="menu" aria-label="Filter by genre" hidden></div>
+      </span>
     </div>
   </section>
 
@@ -455,13 +479,15 @@
   const MAX_GENRES = 3; // a book can carry at most this many genres
   const INSIGHTS_MIN = 10; // books needed before the Insights view shows patterns
   const GENRE_MIN = 3;     // books a genre needs before it appears in "rated highest"
+  const UNTAGGED = "UNTAGGED"; // genre-filter option for books with no genres (uppercase → never a real gkey)
 
   // ---- State ----
   let store = load();
   let flow = null; // active add-flow or detail state
   // Transient search/sort/filter view. Never saved to storage; resets on reload.
-  const DEFAULT_VIEW = { query:"", sort:"score", tier:"all" };
-  let view = Object.assign({}, DEFAULT_VIEW);
+  // A function (not a shared object) so each reset gets its own fresh genres[] array.
+  function freshView(){ return { query:"", sort:"score", tier:"all", genres:[] }; }
+  let view = freshView();
 
   function emptyStore(){ return { books:{}, rankings:{loved:[],fine:[],disliked:[]} }; }
   function isValidShape(s){ return s && s.books && s.rankings; }
@@ -579,7 +605,9 @@
     TIERS.forEach(t=>{
       if(view.tier!=="all" && view.tier!==t) return;
       store.rankings[t].forEach(id=>{
-        if(!matchesQuery(store.books[id], q)) return;
+        const b = store.books[id];
+        if(!matchesQuery(b, q)) return;
+        if(!matchesGenre(b)) return;
         out.push(id);
       });
     });
@@ -611,18 +639,99 @@
     return arr;
   }
 
-  function resetView(){ view = Object.assign({}, DEFAULT_VIEW); render(); }
+  function resetView(){ view = freshView(); render(); }
+
+  // ---- Genre filter (toolbar multi-select popover) ----
+  // Distinct genres with whole-catalog book counts, most-used first; plus the untagged count.
+  function genreFilterOptions(){
+    const counts = genreCounts(); // gkey -> count
+    const names = new Map();
+    usedGenres().forEach(g=> names.set(gkey(g), g));
+    const list = [...counts.keys()].map(k=>({ key:k, name:names.get(k)||k, count:counts.get(k) }))
+      .sort((a,b)=> b.count-a.count || a.name.localeCompare(b.name, undefined, {sensitivity:"base"}));
+    let untagged = 0;
+    TIERS.forEach(t=> store.rankings[t].forEach(id=>{ if(!(store.books[id].genres||[]).length) untagged++; }));
+    return { list, untagged };
+  }
+  function nameForKey(k){ const g = usedGenres().find(x=> gkey(x)===k); return g || null; }
+  // A book passes if it has ANY of the selected genres (OR), or is untagged when that's picked.
+  function matchesGenre(b){
+    if(!view.genres.length) return true;
+    const bg = b.genres||[];
+    if(view.genres.indexOf(UNTAGGED)>=0 && bg.length===0) return true;
+    return bg.some(g=> view.genres.indexOf(gkey(g))>=0);
+  }
+  function toggleGenreFilter(k){
+    const i = view.genres.indexOf(k);
+    if(i>=0) view.genres.splice(i,1); else view.genres.push(k);
+  }
+  function syncGenreChip(){
+    const chip = document.getElementById("genreChip");
+    const n = view.genres.length;
+    if(n===0){ chip.textContent = "Genre"; chip.classList.remove("active"); return; } // caret is a CSS ::after
+    let label;
+    if(n===1){ const k=view.genres[0]; label = (k===UNTAGGED) ? "Untagged" : (nameForKey(k)||"genre"); }
+    else label = n;
+    chip.textContent = "Genre · " + label;
+    chip.classList.add("active");
+  }
+  function renderGenrePop(){
+    const pop = document.getElementById("genrePop");
+    const { list, untagged } = genreFilterOptions();
+    const row = (key, name, count, cls)=>{
+      const on = view.genres.indexOf(key)>=0;
+      return '<button type="button" role="menuitemcheckbox" aria-checked="'+(on?'true':'false')+'" '+
+        'class="gopt'+cls+(on?' on':'')+'" data-k="'+esc(key)+'">'+
+        '<span class="gopt-check">'+(on?'✓':'')+'</span>'+
+        '<span class="gopt-name">'+esc(name)+'</span>'+
+        '<span class="gopt-n">'+count+'</span></button>';
+    };
+    let html = list.map(g=> row(g.key, g.name, g.count, '')).join('');
+    if(untagged>0) html += row(UNTAGGED, 'Untagged', untagged, ' untagged');
+    html += '<div class="gopt-foot"><button type="button" class="glink" id="genreClear">Clear</button></div>';
+    pop.innerHTML = html;
+    pop.querySelectorAll(".gopt").forEach(b=>{
+      b.onclick = (e)=>{
+        e.stopPropagation();               // don't let the outside-click closer fire
+        toggleGenreFilter(b.dataset.k);
+        const on = view.genres.indexOf(b.dataset.k)>=0;
+        b.classList.toggle("on", on);       // update this row in place (keeps menu open + scroll position)
+        b.setAttribute("aria-checked", on ? "true" : "false");
+        b.querySelector(".gopt-check").textContent = on ? "✓" : "";
+        render();
+      };
+    });
+    document.getElementById("genreClear").onclick = (e)=>{ e.stopPropagation(); view.genres = []; render(); renderGenrePop(); };
+  }
+  function closeGenrePop(){
+    const pop = document.getElementById("genrePop");
+    if(pop && !pop.hidden){ pop.hidden = true; document.getElementById("genreChip").setAttribute("aria-expanded","false"); }
+  }
+  function toggleGenrePop(){
+    const pop = document.getElementById("genrePop");
+    if(pop.hidden){ renderGenrePop(); pop.hidden = false; document.getElementById("genreChip").setAttribute("aria-expanded","true"); }
+    else closeGenrePop();
+  }
 
   // Reflect the current view state into the controls, and rebuild the author dropdown.
   function syncControls(){
     const q = document.getElementById("q");
     if(document.activeElement!==q) q.value = view.query; // don't fight the cursor while typing
     document.getElementById("sortSel").value = view.sort;
-    document.querySelectorAll("#tierChips .chip").forEach(chip=>{
+    document.querySelectorAll("#tierChips .chip[data-tier]").forEach(chip=>{
       const on = chip.dataset.tier === view.tier;
       chip.classList.toggle("active", on);
       chip.setAttribute("aria-pressed", on ? "true" : "false");
     });
+    // genre filter: prune stale selections, show/hide the chip, reflect state in its badge
+    const gf = genreFilterOptions();
+    const valid = new Set(gf.list.map(o=>o.key));
+    if(gf.untagged>0) valid.add(UNTAGGED);
+    view.genres = view.genres.filter(k=> valid.has(k));
+    const gfEl = document.getElementById("genreFilter");
+    gfEl.hidden = gf.list.length===0;      // nothing tagged yet → no genre filter
+    if(gfEl.hidden) view.genres = [];
+    syncGenreChip();
   }
 
   function render(highlightId){
@@ -1063,7 +1172,7 @@
       '</div>';
     if(!wasRe) document.getElementById("d-again").onclick = openAdd;
     document.getElementById("d-done").onclick = ()=>{ const hl=id; closeModal(); render(hl); };
-    if(!wasRe) view = Object.assign({}, DEFAULT_VIEW); // a new book: clear filters so it's visible
+    if(!wasRe) view = freshView(); // a new book: clear filters so it's visible
     render(id); // refresh shelf underneath
   }
 
@@ -1235,11 +1344,14 @@
   document.getElementById("q").addEventListener("input", e=>{ view.query = e.target.value; render(); });
   document.getElementById("sortSel").addEventListener("change", e=>{ view.sort = e.target.value; render(); });
   document.getElementById("tierChips").addEventListener("click", e=>{
-    const chip = e.target.closest(".chip");
+    const chip = e.target.closest(".chip[data-tier]"); // excludes the genre chip
     if(!chip) return;
-    view.tier = chip.dataset.tier;
+    view.tier = (view.tier === chip.dataset.tier) ? "all" : chip.dataset.tier; // click again to clear
     render();
   });
+  document.getElementById("genreChip").addEventListener("click", e=>{ e.stopPropagation(); toggleGenrePop(); });
+  document.addEventListener("click", e=>{ if(!e.target.closest("#genreFilter")) closeGenrePop(); });
+  document.addEventListener("keydown", e=>{ if(e.key==="Escape") closeGenrePop(); });
 
   render();
 })();
