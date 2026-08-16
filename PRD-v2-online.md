@@ -66,8 +66,8 @@ Endpoint: `https://openlibrary.org/search.json?title={q}&fields=title,author_nam
   to favor the original edition. Show ~5, most-relevant first.
 - **"No match" handling (see §7 acceptance).** Never block the user; treat "not found" as normal.
 - **Failure ≠ empty.** A network/API error must say "couldn't check," never "no book found."
-- **Privacy disclosure.** A one-line note that titles are sent to Open Library for lookup, and
-  that nothing else leaves the device. (Placement TBD — near the field or in an info affordance.)
+- **Privacy disclosure.** An info icon (ⓘ) by the Title field reveals a one-line note: only the
+  title text is sent to Open Library for lookup; nothing else leaves the device.
 
 ## 6. Non-goals for v2 MVP (resist these)
 
@@ -90,13 +90,18 @@ Endpoint: `https://openlibrary.org/search.json?title={q}&fields=title,author_nam
 - Quality floor preserved: keyboard-operable dropdown (arrow keys + Enter + Escape), visible
   focus, mobile-friendly, user input escaped.
 
-## 8. Open questions / future (v2.1+)
+## 8. Decisions & open questions
 
-- If title search is empty, should we *loosen* the query (general search) or fall back to a
-  second source (Google Books) before giving up?
-- Where exactly does the privacy note live so it's honest but not naggy?
-- Would auto-filling from an edition ever pick the "wrong" author (translator, contributor)? How
-  do we guard against that?
+**Decided (2026):** minimum query length is **3 characters**; the privacy note lives behind an
+**info icon** by the Title field; an empty title search **falls back to manual entry only** for
+the MVP.
+
+**Deferred to v2.1:** loosening the query or adding a second source (Google Books) when title
+search is empty.
+
+**Still open:** could auto-fill ever pick the "wrong" author (a translator/contributor)? Interim
+guard: take the first/primary `author_name` and always show it in the suggestion so the user can
+catch a bad pick before selecting.
 
 ## 9. Why this is worth doing (learning + interview value)
 

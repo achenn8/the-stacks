@@ -163,6 +163,28 @@
     padding:10px 12px; resize:vertical;
   }
   .fld input:focus, .fld textarea:focus{outline:2px solid var(--stamp); outline-offset:1px; border-color:var(--stamp)}
+  /* v2 online: title lookup (info icon + suggestions dropdown) */
+  .fld-lab{display:block; font-size:12px; text-transform:uppercase; letter-spacing:1px; color:var(--ink-soft); margin-bottom:6px}
+  .info-i{background:transparent; border:none; cursor:pointer; color:var(--ink-faint); font-size:13px; padding:0 2px; line-height:1}
+  .info-i:hover{color:var(--ink-soft)}
+  .info-i:focus-visible{outline:2px solid var(--stamp); outline-offset:2px; border-radius:2px}
+  .info-note{font-size:12px; color:var(--ink-soft); line-height:1.5; background:var(--card-2); border-radius:var(--radius); padding:8px 10px; margin-bottom:8px}
+  .ti-wrap{position:relative}
+  .suggest{
+    position:absolute; top:calc(100% + 4px); left:0; right:0; z-index:20;
+    background:var(--card); border:1px solid var(--card-edge); border-radius:var(--radius);
+    box-shadow:0 12px 30px rgba(0,0,0,.28); overflow:hidden; max-height:260px; overflow-y:auto;
+  }
+  .suggest-item{
+    display:flex; flex-direction:column; gap:2px; width:100%; text-align:left; cursor:pointer;
+    background:transparent; border:none; border-bottom:1px solid var(--card-2);
+    padding:9px 12px; font-family:"Space Mono",monospace;
+  }
+  .suggest-item:last-child{border-bottom:none}
+  .suggest-item:hover, .suggest-item:focus-visible{background:var(--card-2); outline:none}
+  .suggest-t{font-family:"Bitter",serif; font-size:15px; color:var(--ink)}
+  .suggest-a{font-size:12px; color:var(--ink-soft); text-transform:uppercase; letter-spacing:.5px}
+  .suggest-msg{padding:10px 12px; font-size:13px; color:var(--ink-faint)}
 
   .row{display:flex; gap:10px; justify-content:flex-end; margin-top:22px; flex-wrap:wrap}
   .btn{
@@ -1031,11 +1053,97 @@
     if(flow.step==="done")    return renderDone();
   }
 
+  // ---- v2 (online): Open Library title lookup ----
+  // ENHANCEMENT ONLY. If the network is down or the API fails, the title/author boxes still
+  // work as plain text (see the catch + the manual fallback). The only thing that ever leaves
+  // the device is the title text being looked up — never the reading list, scores, or notes.
+  const OL_SEARCH = "https://openlibrary.org/search.json";
+  const olCache = new Map(); // lowercased query -> ranked results (in-memory, this session only)
+  let olSeq = 0;             // bumped per request so we can ignore stale (out-of-order) responses
+  let olTimer = null;        // debounce timer
+
+  // Ask Open Library for matches. Returns [{title, author, year}], best-first. Throws on failure.
+  async function olLookup(q){
+    const key = q.toLowerCase();
+    if(olCache.has(key)) return olCache.get(key);            // don't re-ask for something we've seen
+    const url = OL_SEARCH + "?title=" + encodeURIComponent(q) +
+      "&fields=title,author_name,first_publish_year&limit=6"; // only ask for the fields we use
+    const res = await fetch(url);                            // the network request (returns later)
+    if(!res.ok) throw new Error("HTTP " + res.status);
+    const data = await res.json();
+    const results = (data.docs || [])
+      .filter(d => d.title && d.author_name && d.author_name.length) // keep entries with a title + author
+      .map(d => ({ title: d.title, author: d.author_name[0], year: d.first_publish_year || null }))
+      .slice(0, 5);
+    olCache.set(key, results);
+    return results;
+  }
+
+  function hideSuggest(){ const box=document.getElementById("f-suggest"); if(box){ box.hidden=true; box.innerHTML=""; } }
+
+  // Render one of: "loading" | "error" | "empty" | an array of results.
+  function renderSuggest(state){
+    const box = document.getElementById("f-suggest");
+    if(!box) return;
+    if(state === "loading"){ box.innerHTML = '<div class="suggest-msg">Searching Open Library…</div>'; box.hidden=false; return; }
+    if(state === "error"){ box.innerHTML = '<div class="suggest-msg">Couldn’t reach the lookup — just type it in.</div>'; box.hidden=false; return; }
+    if(state === "empty"){ box.innerHTML = '<div class="suggest-msg">No match — keep typing, or enter it yourself.</div>'; box.hidden=false; return; }
+    box.innerHTML = state.map((r,i)=>
+      '<button type="button" role="option" class="suggest-item" data-i="'+i+'">'+
+        '<span class="suggest-t">'+esc(r.title)+'</span>'+                        // esc(): external data must be escaped
+        '<span class="suggest-a">'+esc(r.author)+(r.year?' · '+r.year:'')+'</span>'+
+      '</button>').join('');
+    box.hidden = false;
+    box.querySelectorAll(".suggest-item").forEach(b=>{
+      b.onmousedown = (e)=>{ e.preventDefault(); };  // fire before the input's blur so the pick lands
+      b.onclick = ()=>{
+        const r = state[+b.dataset.i];
+        document.getElementById("f-title").value = r.title;   // fill title
+        document.getElementById("f-author").value = r.author; // ...and author (the whole point)
+        hideSuggest();
+        document.getElementById("f-author").focus();
+      };
+    });
+  }
+
+  // Attach the debounced lookup to the title input. Called from renderMeta.
+  function wireTitleLookup(titleInput){
+    titleInput.addEventListener("input", ()=>{
+      const q = titleInput.value.trim();
+      clearTimeout(olTimer);
+      if(q.length < 3){ hideSuggest(); return; }   // min length: don't search fragments
+      olTimer = setTimeout(()=>{                     // debounce: wait for a pause in typing
+        const mine = ++olSeq;                        // this request's ticket
+        renderSuggest("loading");
+        olLookup(q).then(results=>{
+          if(mine !== olSeq) return;                 // a newer keystroke already fired — drop this answer
+          renderSuggest(results.length ? results : "empty");
+        }).catch(()=>{
+          if(mine !== olSeq) return;
+          renderSuggest("error");                    // failure != "no book" — say we couldn't check
+        });
+      }, 300);
+    });
+    titleInput.addEventListener("keydown", e=>{
+      if(e.key === "Escape" && !document.getElementById("f-suggest").hidden){ e.stopPropagation(); hideSuggest(); }
+    });
+    titleInput.addEventListener("blur", ()=>{ setTimeout(hideSuggest, 150); }); // let a click land first
+  }
+
   function renderMeta(){
     sheet.innerHTML =
       '<h2 id="sheetTitle">Log a finished book</h2>'+
       '<p class="step-tag">Step 1 of 3 · the details</p>'+
-      '<label class="fld"><span>Title</span><input id="f-title" value="'+esc(flow.title)+'" autocomplete="off"></label>'+
+      '<div class="fld title-fld">'+
+        '<span class="fld-lab">Title'+
+          ' <button type="button" class="info-i" id="titleInfo" aria-label="About the online title lookup" aria-expanded="false">ⓘ</button>'+
+        '</span>'+
+        '<div class="info-note" id="titleInfoNote" hidden>Typing here looks the title up on Open Library to fill in the author. Only the title text is sent — never your list, scores, or notes.</div>'+
+        '<div class="ti-wrap">'+
+          '<input id="f-title" value="'+esc(flow.title)+'" autocomplete="off">'+
+          '<div class="suggest" id="f-suggest" role="listbox" aria-label="Title suggestions" hidden></div>'+
+        '</div>'+
+      '</div>'+
       '<label class="fld"><span>Author</span><input id="f-author" value="'+esc(flow.author)+'" autocomplete="off"></label>'+
       '<label class="fld"><span>A line to remember it by — optional</span>'+
         '<textarea id="f-take" rows="2" placeholder="one thought, a favorite quote, why it stuck">'+esc(flow.takeaway)+'</textarea></label>'+
@@ -1048,6 +1156,11 @@
     renderGenreBox();
     const titleInput = document.getElementById("f-title");
     titleInput.focus();
+    wireTitleLookup(titleInput);                 // v2: attach the online lookup
+    document.getElementById("titleInfo").onclick = ()=>{
+      const note = document.getElementById("titleInfoNote"), btn = document.getElementById("titleInfo");
+      const open = note.hidden; note.hidden = !open; btn.setAttribute("aria-expanded", open ? "true" : "false");
+    };
     document.getElementById("f-cancel").onclick = closeModal;
     document.getElementById("f-next").onclick = ()=>{
       const t = titleInput.value.trim();
