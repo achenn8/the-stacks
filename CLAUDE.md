@@ -3,8 +3,10 @@
 ## What this is
 A single-file, single-user, offline book-ranking web app. Comparison-based ranking
 (not star ratings — you rank books by comparing them head-to-head, not by giving stars).
-One file: `the-stacks.html`. No server, no accounts, no build step.
-Full requirements are in `PRD-the-stacks.md` — read it before any non-trivial work.
+One file: `index.html` (renamed from `the-stacks.html` when deployed to Vercel; the pure
+offline pre-API version is preserved as `the-stacks-v1.html`). No accounts, no build step;
+one online exception (the title lookup — see Hard constraints).
+Full requirements are in `PRD-the-stacks.md`; the online addendum is in `PRD-v2-online.md`.
 
 ## Who I am / how to talk to me
 - I work in investment banking and am pivoting into product management. I'm building this
@@ -25,8 +27,9 @@ Full requirements are in `PRD-the-stacks.md` — read it before any non-trivial 
 8. After changes, remind me to run the manual QA checklist (PRD Section 8) and commit.
 
 ## Hard constraints (do not violate without being asked)
-- Keep everything in `the-stacks.html`. No frameworks, bundlers, or build step (the two
-  linked Google Fonts are the only exception). Must run by opening the file.
+- Keep everything in `index.html` (the deployed app; formerly `the-stacks.html`). No
+  frameworks, bundlers, or build step (the two linked Google Fonts are the only exception).
+  Must run by opening the file.
 - **Online exception (added when v2 merged into main):** the title field now calls the
   Open Library API to auto-fill title/author. This is a **progressive enhancement** — the
   app still works fully offline (typing by hand), and only the typed title is ever sent
