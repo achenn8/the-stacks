@@ -144,6 +144,22 @@ details in the auto-memory roadmap notes:
   Build must add touch dragging + a keyboard fallback (quality floor). See memory
   `roadmap-reorder-whole-catalog`.
 - **Online genre auto-suggest** (e.g. detect that "Crush" is Poetry). Needs an external
-  book-metadata API → breaks the offline/no-server/single-file constraints and the
-  privacy stance; for a future online version only. See memory
+  book-metadata API and messy-data handling; still deferred. See memory
   `roadmap-online-genre-autosuggest`.
+
+## Resume here (next session) — as of 2026-08-24
+Everything is committed on `main`; nothing pending in code. Repo tracks: `index.html`,
+`README.md`, `PRD-the-stacks.md`, `PRD-v2-online.md`, `CLAUDE.md`. `the-stacks-v1.html` (pure
+offline snapshot) is intentionally UNTRACKED. The `v2-online` branch is already merged into main.
+
+**Immediate task: deploy to Vercel (git-connected).**
+1. Create an EMPTY GitHub repo (no README/license), e.g. `the-stacks`.
+2. `git remote add origin https://github.com/<user>/the-stacks.git`, then `git push -u origin main`.
+3. Vercel → Continue with GitHub → Add New Project → import the repo → Framework preset "Other",
+   no build command / output dir → Deploy.
+4. Paste the live URL into the "Live demo" placeholder in `README.md`, then commit + push
+   (auto-redeploys).
+
+**After deploy — agreed roadmap** (see memory `roadmap-v2-future`): (a) privacy-first analytics
+(events only, never book content), then (b) PWA to make it installable. An interview-stories
+artifact was also published (find/update it via the Artifact tool's list).
