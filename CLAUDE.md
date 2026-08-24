@@ -25,8 +25,13 @@ Full requirements are in `PRD-the-stacks.md` — read it before any non-trivial 
 8. After changes, remind me to run the manual QA checklist (PRD Section 8) and commit.
 
 ## Hard constraints (do not violate without being asked)
-- Keep everything in `the-stacks.html`. No frameworks, bundlers, or new runtime deps
-  (the two linked Google Fonts are the only exception). Must run by opening the file.
+- Keep everything in `the-stacks.html`. No frameworks, bundlers, or build step (the two
+  linked Google Fonts are the only exception). Must run by opening the file.
+- **Online exception (added when v2 merged into main):** the title field now calls the
+  Open Library API to auto-fill title/author. This is a **progressive enhancement** — the
+  app still works fully offline (typing by hand), and only the typed title is ever sent
+  out (never the reading list, scores, or notes). No OTHER network calls or external deps
+  may be added without being asked. A pure-offline snapshot lives in `the-stacks-v1.html`.
 - Preserve the data model, scoring formula, and placement algorithm documented in the
   PRD (Sections 4.3–4.5). If a change adds fields, migrate existing data; never wipe it.
 - localStorage key is `"the-stacks-v2"` (localStorage = a small storage area in the browser
@@ -117,11 +122,20 @@ key, scoring formula, quality floor all present).
   The 3 analysis headers are serif subheadings with dividers between them. READ-ONLY:
   computes from the store on open; no writes, no schema change. Both thresholds are tunable
   constants. See PRD Section 7.
-- **Backlog complete (P0–P3 + polish).** Nothing queued for v1. Reminder: user still to run
-  the real-browser QA pass (export a backup first).
+- **Backlog complete (P0–P3 + polish).** Reminder: user still to run the real-browser QA
+  pass (export a backup first).
+- **v2 (online) STARTED — merged into main.** The Open Library title autocomplete (PRD in
+  `PRD-v2-online.md`) now ships on main as a progressive enhancement: typing a title fetches
+  matches (debounced, AbortController-cancelled, deduped) and fills title + author; works in
+  both the add flow and the detail-view title edit; degrades gracefully offline. main is
+  therefore no longer offline-only (see the Hard-constraints online exception). The pure
+  offline v1 is preserved as `the-stacks-v1.html` and at git commit `ae21410`. Also merged:
+  overall-rank confirmation, and the Insights button fills cream at ≥10 books. User is
+  preparing to DEPLOY.
 
-## Deferred to v2 (not for v1)
-Two ideas parked with agreed designs — details in the auto-memory roadmap notes:
+## Deferred (not yet built)
+Two ideas parked with agreed designs (the v2 title autocomplete has shipped; these haven't) —
+details in the auto-memory roadmap notes:
 - **Reorder the whole catalog by dragging.** Keep the 3 tiers; drag to reorder within a
   tier and drag across a divider to re-tier; scores recompute on Done via `scoreFor`.
   Build must add touch dragging + a keyboard fallback (quality floor). See memory
