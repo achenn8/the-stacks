@@ -65,6 +65,9 @@
   }
   .ghost-top:hover{color:var(--card); border-color:rgba(239,231,213,.7)}
   .ghost-top:focus-visible{outline:2px solid var(--stamp); outline-offset:2px}
+  /* Insights gets promoted to a cream fill once there's enough data to be worth opening (>=10 books) */
+  .ghost-top.promoted{background:var(--card); color:var(--ink); border-color:var(--card); box-shadow:0 2px 0 var(--desk-edge); transition:transform .12s ease, box-shadow .12s ease}
+  .ghost-top.promoted:hover{color:var(--ink); border-color:var(--card); transform:translateY(-1px); box-shadow:0 3px 0 var(--desk-edge)}
 
   /* ---- Shelf / drawers ---- */
   .shelf{max-width:820px; margin:0 auto; padding-top:36px}
@@ -181,7 +184,7 @@
     padding:9px 12px; font-family:"Space Mono",monospace;
   }
   .suggest-item:last-child{border-bottom:none}
-  .suggest-item:hover, .suggest-item:focus-visible{background:var(--card-2); outline:none}
+  .suggest-item:hover, .suggest-item:focus-visible, .suggest-item.active{background:var(--card-2); outline:none}
   .suggest-t{font-family:"Bitter",serif; font-size:15px; color:var(--ink)}
   .suggest-a{font-size:12px; color:var(--ink-soft); text-transform:uppercase; letter-spacing:.5px}
   .suggest-msg{padding:10px 12px; font-size:13px; color:var(--ink-faint)}
@@ -775,6 +778,7 @@
 
     controlsEl.hidden = false;
     insightsBtn.hidden = false;
+    insightsBtn.classList.toggle("promoted", total >= INSIGHTS_MIN); // fill it in once Insights is worth opening
     syncControls();
 
     const ids = visibleIds();
@@ -1058,36 +1062,74 @@
   // work as plain text (see the catch + the manual fallback). The only thing that ever leaves
   // the device is the title text being looked up — never the reading list, scores, or notes.
   const OL_SEARCH = "https://openlibrary.org/search.json";
-  const olCache = new Map(); // lowercased query -> ranked results (in-memory, this session only)
-  let olSeq = 0;             // bumped per request so we can ignore stale (out-of-order) responses
-  let olTimer = null;        // debounce timer
+  const olCache = new Map();  // lowercased query -> ranked results (in-memory, this session only)
+  let olTimer = null;         // debounce timer
+  let olController = null;     // AbortController for the in-flight request, so we can cancel it
+  let olResults = [];         // results currently shown (so the keyboard can select one)
+  let olActive = -1;          // highlighted row for keyboard nav (-1 = none)
 
-  // Ask Open Library for matches. Returns [{title, author, year}], best-first. Throws on failure.
-  async function olLookup(q){
+  // Turn Open Library's noisy docs into a short, clean list:
+  // - keep only entries that have a title AND an author
+  // - collapse duplicate editions of one work (same title + first-publish year), keeping the
+  //   fuller author name (so "Donna Tartt" wins over a bare "Tartt")
+  function betterAuthor(a, b){
+    const sa = a.includes(" "), sb = b.includes(" ");   // a full "First Last" beats a lone surname
+    return sa !== sb ? sa : a.length > b.length;
+  }
+  function rankResults(docs){
+    const seen = new Map(); const out = [];
+    (docs || []).forEach(d=>{
+      if(!d.title || !d.author_name || !d.author_name.length) return;
+      const r = { title:d.title, author:d.author_name[0], year:d.first_publish_year || null };
+      const key = r.title.toLowerCase().replace(/[^a-z0-9]/g,"") + "|" + (r.year || "");
+      if(seen.has(key)){
+        const ex = out[seen.get(key)];
+        if(betterAuthor(r.author, ex.author)) ex.author = r.author;
+      }else{ seen.set(key, out.length); out.push(r); }
+    });
+    return out.slice(0, 5);
+  }
+
+  // Ask Open Library for matches. Returns [{title, author, year}]. Throws on failure/abort.
+  async function olLookup(q, signal){
     const key = q.toLowerCase();
     if(olCache.has(key)) return olCache.get(key);            // don't re-ask for something we've seen
     const url = OL_SEARCH + "?title=" + encodeURIComponent(q) +
-      "&fields=title,author_name,first_publish_year&limit=6"; // only ask for the fields we use
-    const res = await fetch(url);                            // the network request (returns later)
+      "&fields=title,author_name,first_publish_year&limit=8"; // a few extra to survive dedupe
+    const res = await fetch(url, { signal });                // { signal } lets us cancel this request
     if(!res.ok) throw new Error("HTTP " + res.status);
     const data = await res.json();
-    const results = (data.docs || [])
-      .filter(d => d.title && d.author_name && d.author_name.length) // keep entries with a title + author
-      .map(d => ({ title: d.title, author: d.author_name[0], year: d.first_publish_year || null }))
-      .slice(0, 5);
+    const results = rankResults(data.docs);
     olCache.set(key, results);
     return results;
   }
 
-  function hideSuggest(){ const box=document.getElementById("f-suggest"); if(box){ box.hidden=true; box.innerHTML=""; } }
+  // These helpers take a ctx = { title:<input>, author:<input>, box:<div> } so the same lookup
+  // works for both the add flow and editing a book's title in the detail view.
+  function hideSuggest(box){ if(box){ box.hidden=true; box.innerHTML=""; } olResults=[]; olActive=-1; }
 
-  // Render one of: "loading" | "error" | "empty" | an array of results.
-  function renderSuggest(state){
-    const box = document.getElementById("f-suggest");
+  function selectResult(ctx, i){
+    const r = olResults[i]; if(!r) return;
+    ctx.title.value = r.title;    // fill title
+    ctx.author.value = r.author; // ...and author (the whole point)
+    hideSuggest(ctx.box);
+    ctx.author.focus();
+  }
+  function paintActive(box){
+    const items = box.querySelectorAll(".suggest-item");
+    items.forEach((el,i)=> el.classList.toggle("active", i===olActive));
+    if(olActive>=0 && items[olActive]) items[olActive].scrollIntoView({block:"nearest"});
+  }
+
+  // Render one of: "loading" | "error" | "empty" | an array of results into ctx.box.
+  function renderSuggest(ctx, state){
+    const box = ctx.box;
     if(!box) return;
+    olResults = []; olActive = -1;
     if(state === "loading"){ box.innerHTML = '<div class="suggest-msg">Searching Open Library…</div>'; box.hidden=false; return; }
     if(state === "error"){ box.innerHTML = '<div class="suggest-msg">Couldn’t reach the lookup — just type it in.</div>'; box.hidden=false; return; }
     if(state === "empty"){ box.innerHTML = '<div class="suggest-msg">No match — keep typing, or enter it yourself.</div>'; box.hidden=false; return; }
+    olResults = state;
     box.innerHTML = state.map((r,i)=>
       '<button type="button" role="option" class="suggest-item" data-i="'+i+'">'+
         '<span class="suggest-t">'+esc(r.title)+'</span>'+                        // esc(): external data must be escaped
@@ -1095,39 +1137,38 @@
       '</button>').join('');
     box.hidden = false;
     box.querySelectorAll(".suggest-item").forEach(b=>{
-      b.onmousedown = (e)=>{ e.preventDefault(); };  // fire before the input's blur so the pick lands
-      b.onclick = ()=>{
-        const r = state[+b.dataset.i];
-        document.getElementById("f-title").value = r.title;   // fill title
-        document.getElementById("f-author").value = r.author; // ...and author (the whole point)
-        hideSuggest();
-        document.getElementById("f-author").focus();
-      };
+      b.onmousedown = (e)=>{ e.preventDefault(); };   // fire before the input's blur so the pick lands
+      b.onclick = ()=> selectResult(ctx, +b.dataset.i);
     });
   }
 
-  // Attach the debounced lookup to the title input. Called from renderMeta.
-  function wireTitleLookup(titleInput){
-    titleInput.addEventListener("input", ()=>{
-      const q = titleInput.value.trim();
+  // Attach the debounced lookup + keyboard nav to a title input.
+  // ctx = { title:<input>, author:<input>, box:<div> }. Used by the add flow AND the detail edit.
+  function wireTitleLookup(ctx){
+    ctx.title.addEventListener("input", ()=>{
+      const q = ctx.title.value.trim();
       clearTimeout(olTimer);
-      if(q.length < 3){ hideSuggest(); return; }   // min length: don't search fragments
-      olTimer = setTimeout(()=>{                     // debounce: wait for a pause in typing
-        const mine = ++olSeq;                        // this request's ticket
-        renderSuggest("loading");
-        olLookup(q).then(results=>{
-          if(mine !== olSeq) return;                 // a newer keystroke already fired — drop this answer
-          renderSuggest(results.length ? results : "empty");
-        }).catch(()=>{
-          if(mine !== olSeq) return;
-          renderSuggest("error");                    // failure != "no book" — say we couldn't check
+      if(olController) olController.abort();          // cancel any request still in flight
+      if(q.length < 3){ hideSuggest(ctx.box); return; } // min length: don't search fragments
+      olTimer = setTimeout(()=>{                       // debounce: wait for a pause in typing
+        olController = new AbortController();
+        renderSuggest(ctx, "loading");
+        olLookup(q, olController.signal).then(results=>{
+          renderSuggest(ctx, results.length ? results : "empty");
+        }).catch(err=>{
+          if(err && err.name === "AbortError") return; // superseded by a newer keystroke — ignore
+          renderSuggest(ctx, "error");                 // real failure != "no book" — say we couldn't check
         });
       }, 300);
     });
-    titleInput.addEventListener("keydown", e=>{
-      if(e.key === "Escape" && !document.getElementById("f-suggest").hidden){ e.stopPropagation(); hideSuggest(); }
+    ctx.title.addEventListener("keydown", e=>{
+      if(ctx.box.hidden) return;                       // when closed, let Escape reach the modal closer
+      if(e.key === "ArrowDown"){ e.preventDefault(); olActive = Math.min(olActive+1, olResults.length-1); paintActive(ctx.box); }
+      else if(e.key === "ArrowUp"){ e.preventDefault(); olActive = Math.max(olActive-1, 0); paintActive(ctx.box); }
+      else if(e.key === "Enter" && olActive >= 0){ e.preventDefault(); selectResult(ctx, olActive); }
+      else if(e.key === "Escape"){ e.stopPropagation(); hideSuggest(ctx.box); } // close the dropdown, not the modal
     });
-    titleInput.addEventListener("blur", ()=>{ setTimeout(hideSuggest, 150); }); // let a click land first
+    ctx.title.addEventListener("blur", ()=>{ setTimeout(()=>hideSuggest(ctx.box), 150); }); // let a click land first
   }
 
   function renderMeta(){
@@ -1156,7 +1197,7 @@
     renderGenreBox();
     const titleInput = document.getElementById("f-title");
     titleInput.focus();
-    wireTitleLookup(titleInput);                 // v2: attach the online lookup
+    wireTitleLookup({ title:titleInput, author:document.getElementById("f-author"), box:document.getElementById("f-suggest") }); // v2: attach the online lookup
     document.getElementById("titleInfo").onclick = ()=>{
       const note = document.getElementById("titleInfoNote"), btn = document.getElementById("titleInfo");
       const open = note.hidden; note.hidden = !open; btn.setAttribute("aria-expanded", open ? "true" : "false");
@@ -1269,14 +1310,14 @@
     const id = flow.placedId;
     const wasRe = flow.wasReRank;
     const b = store.books[id];
-    const arr = store.rankings[b.tier];
-    const rank = arr.indexOf(id) + 1;
+    const rank = globalRank(id);      // overall position across the whole catalog
+    const total = totalBooks();
     const score = scoreOf(id).toFixed(1);
     sheet.innerHTML =
       '<div class="confirm">'+
         '<div class="big-stamp" data-tier="'+b.tier+'"><span class="num">'+score+'</span></div>'+
         '<p>'+(wasRe?"Re-filed":"Filed")+' <b>“'+esc(b.title)+'”</b> under <b>'+TIER_META[b.tier].label+'</b>, '+
-        'ranked <b>#'+rank+' of '+arr.length+'</b> in that drawer.<br>'+
+        'ranked <b>#'+rank+' of '+total+'</b> overall.<br>'+
         'Its call number moves as you file more nearby.</p>'+
       '</div>'+
       '<div class="row" style="justify-content:center; margin-top:24px">'+
@@ -1303,7 +1344,10 @@
       '<h2 id="sheetTitle" style="position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)">Book details</h2>'+
       '<div class="detail-head">'+
         '<div style="flex:1; min-width:0">'+
-          '<input id="d-title" class="d-title-input" value="'+esc(b.title)+'" aria-label="Title" autocomplete="off">'+
+          '<div class="ti-wrap">'+
+            '<input id="d-title" class="d-title-input" value="'+esc(b.title)+'" aria-label="Title" autocomplete="off">'+
+            '<div class="suggest" id="d-suggest" role="listbox" aria-label="Title suggestions" hidden></div>'+
+          '</div>'+
           '<input id="d-author" class="d-author-input" value="'+esc(b.author||"")+'" placeholder="Add author" aria-label="Author" autocomplete="off">'+
           (b.dateFinished ? '<div class="d-date">'+esc(b.dateFinished)+'</div>' : '')+
         '</div>'+
@@ -1323,6 +1367,7 @@
         '</span>'+
       '</div>';
     renderGenreBox();
+    wireTitleLookup({ title:document.getElementById("d-title"), author:document.getElementById("d-author"), box:document.getElementById("d-suggest") }); // v2: lookup on title edit too
     document.getElementById("d-close").onclick = closeModal;
     document.getElementById("d-rerank").onclick = ()=>{
       const rb = store.books[id];
