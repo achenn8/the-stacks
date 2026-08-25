@@ -125,16 +125,20 @@ key, scoring formula, quality floor all present).
   The 3 analysis headers are serif subheadings with dividers between them. READ-ONLY:
   computes from the store on open; no writes, no schema change. Both thresholds are tunable
   constants. See PRD Section 7.
-- **Backlog complete (P0–P3 + polish).** Reminder: user still to run the real-browser QA
-  pass (export a backup first).
+- **Backlog complete (P0–P3 + polish).** Real-browser QA pass DONE by the user (backup
+  exported first); a functional smoke test also passed on `index.html`.
 - **v2 (online) STARTED — merged into main.** The Open Library title autocomplete (PRD in
   `PRD-v2-online.md`) now ships on main as a progressive enhancement: typing a title fetches
   matches (debounced, AbortController-cancelled, deduped) and fills title + author; works in
   both the add flow and the detail-view title edit; degrades gracefully offline. main is
   therefore no longer offline-only (see the Hard-constraints online exception). The pure
   offline v1 is preserved as `the-stacks-v1.html` and at git commit `ae21410`. Also merged:
-  overall-rank confirmation, and the Insights button fills cream at ≥10 books. User is
-  preparing to DEPLOY.
+  overall-rank confirmation, and the Insights button fills cream at ≥10 books.
+- **DEPLOYED — DONE (2026-08-24).** Live at **https://the-stacks-one.vercel.app** via Vercel,
+  git-connected to `github.com/achenn8/the-stacks` (push to `main` → auto-redeploy). Verified
+  live: HTTPS, app renders, localStorage persists on the real origin. README "Live demo" line
+  carries the URL. `the-stacks-v1.html` is now **gitignored** (offline snapshot stays local,
+  never deployed).
 
 ## Deferred (not yet built)
 Two ideas parked with agreed designs (the v2 title autocomplete has shipped; these haven't) —
@@ -148,18 +152,19 @@ details in the auto-memory roadmap notes:
   `roadmap-online-genre-autosuggest`.
 
 ## Resume here (next session) — as of 2026-08-24
-Everything is committed on `main`; nothing pending in code. Repo tracks: `index.html`,
-`README.md`, `PRD-the-stacks.md`, `PRD-v2-online.md`, `CLAUDE.md`. `the-stacks-v1.html` (pure
-offline snapshot) is intentionally UNTRACKED. The `v2-online` branch is already merged into main.
+**Shipped and deployed.** Everything is committed and pushed on `main` (local ↔
+`origin/main` in sync); nothing pending in code. Live at **https://the-stacks-one.vercel.app**;
+GitHub remote is `github.com/achenn8/the-stacks` (push to `main` → Vercel auto-redeploys).
+Repo tracks: `index.html`, `README.md`, `PRD-the-stacks.md`, `PRD-v2-online.md`, `CLAUDE.md`,
+`.gitignore`. `the-stacks-v1.html` (pure offline snapshot) is **gitignored** and stays local.
+The `v2-online` branch is already merged into main.
 
-**Immediate task: deploy to Vercel (git-connected).**
-1. Create an EMPTY GitHub repo (no README/license), e.g. `the-stacks`.
-2. `git remote add origin https://github.com/<user>/the-stacks.git`, then `git push -u origin main`.
-3. Vercel → Continue with GitHub → Add New Project → import the repo → Framework preset "Other",
-   no build command / output dir → Deploy.
-4. Paste the live URL into the "Live demo" placeholder in `README.md`, then commit + push
-   (auto-redeploys).
+**Pending (user-owned, no code):** the user plans to **manually reword `README.md`** in a few
+days. If they edit it on GitHub's web UI, `git pull` before the next local push (web commit will
+be ahead of local).
 
-**After deploy — agreed roadmap** (see memory `roadmap-v2-future`): (a) privacy-first analytics
-(events only, never book content), then (b) PWA to make it installable. An interview-stories
-artifact was also published (find/update it via the Artifact tool's list).
+**Next feature — agreed roadmap** (see memory `roadmap-v2-future`): (a) privacy-first analytics
+(events only, never book content — treat the analytics script as a documented online exception
+like the Open Library call), then (b) PWA to make it installable. An interview-stories artifact
+was also published (find/update it via the Artifact tool's list). No rush; start when the user
+flags it.
