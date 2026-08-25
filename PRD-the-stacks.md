@@ -160,7 +160,7 @@ This is the core habit. Do it in small cycles:
 1. **Start** Claude Code in the project folder: `claude`
 2. **Ask for a plan first, not code.** For anything non-trivial, say: *"Before writing code, read PRD-the-stacks.md and outline your plan for increment P0 (export/import). Don't edit files yet."* Reading the plan is how you catch misunderstandings cheaply.
 3. **Approve, then let it edit.** It will show proposed changes (a "diff" — red for removed lines, green for added). Read them. Approve or ask for adjustments.
-4. **Test it yourself** using the manual checklist in Section 8. Open `the-stacks.html` in your browser and click through.
+4. **Test it yourself** using the manual checklist in Section 8. Open `index.html` (the deployed file; formerly `the-stacks.html`) in your browser and click through.
 5. **Commit** when it works (Section 2.7). If it doesn't, either ask Claude Code to fix it or `git restore .` and try a smaller step.
 
 **Guardrails for your first few sessions:**
@@ -187,7 +187,7 @@ After it's done, run the Section 8 checklist, then commit.
 
 ## 4. What already exists (v1) — current-state spec
 
-The shipped app is a **single self-contained `the-stacks.html` file**. No server, no accounts, no build step. Data persists in the browser via `localStorage`. Design is a "library card-catalog" theme: each book is a manila index card, tiers are catalog drawers, and the score is stamped like a call number in the card's corner.
+The shipped app is a **single self-contained file** — `index.html` (renamed from `the-stacks.html` when deployed; a pure pre-API offline copy is kept as `the-stacks-v1.html`). No server, no accounts, no build step. Data persists in the browser via `localStorage`. Design is a "library card-catalog" theme: each book is a manila index card, tiers are catalog drawers, and the score is stamped like a call number in the card's corner.
 
 ### 4.1 The core loop (already built)
 
@@ -294,7 +294,7 @@ insert new id at index lo
 
 ## 6. Constraints and technical guardrails (tell Claude Code to honor these)
 
-1. **Single self-contained file.** Keep everything in `the-stacks.html` unless a specific increment explicitly says otherwise. It must run by double-clicking the file — no server, no build step.
+1. **Single self-contained file.** Keep everything in `index.html` (formerly `the-stacks.html`) unless a specific increment explicitly says otherwise. It must run by double-clicking the file — no server, no build step.
 2. **No external runtime dependencies** beyond the two Google Fonts already linked. The app must work offline once loaded (fonts degrade gracefully).
 3. **Preserve the data model and scoring formula** in Sections 4.3–4.5 unless an increment explicitly changes them. If a change adds fields, **migrate existing data** rather than wiping it (see Section 9 on migrations).
 4. **Never break the `localStorage` key silently.** If the schema version changes, bump the key deliberately and migrate.
@@ -404,11 +404,11 @@ Each increment is sized to be one Claude Code session. Priorities: **P0** before
 
 ## 8. Manual QA checklist (run after every increment)
 
-There's no automated test framework — it's a static file — so verify by hand. Open `the-stacks.html` in your browser and check:
+There's no automated test framework — it's a static file — so verify by hand. Open `index.html` (the deployed file; formerly `the-stacks.html`) in your browser and check:
 
 - [ ] App loads with existing data intact (nothing wiped).
 - [ ] Adding a book: title required; author and takeaway optional; tier selection works.
-- [ ] Comparison flow appears when the chosen tier already has books; "Too close to call" ends it early.
+- [ ] Comparison flow appears when the chosen tier already has books, and every placement resolves through the comparisons. (The old "Too close to call" early-exit was removed on purpose — see CLAUDE.md.)
 - [ ] New book lands in the right tier with a sensible score and rank.
 - [ ] Scores across a tier are ordered and within the tier's band (Section 4.4).
 - [ ] Editing a takeaway saves and persists after refresh.
@@ -437,20 +437,22 @@ When an increment adds or changes a field:
 
 Create a file named `CLAUDE.md` in the project folder with this content. Claude Code reads it automatically each session.
 
+> **Note:** This is the *original* starter template. The project's live `CLAUDE.md` has since grown well beyond it (it tracks the deployed `index.html` filename, the `the-stacks-v2` key, the full backlog, and current status) — treat the actual `CLAUDE.md` in the repo as the source of truth, not this snapshot.
+
 ```
 # The Stacks — project notes for Claude Code
 
 ## What this is
 A single-file, single-user, offline book-ranking web app. Comparison-based ranking
-(not star ratings). One file: the-stacks.html. No server, no accounts, no build step.
+(not star ratings). One file: index.html. No server, no accounts, no build step.
 Full requirements are in PRD-the-stacks.md — read it before non-trivial work.
 
 ## Hard constraints (do not violate without being asked)
-- Keep everything in the-stacks.html. No frameworks, bundlers, or new runtime deps
+- Keep everything in index.html. No frameworks, bundlers, or new runtime deps
   (the two linked Google Fonts are the only exception). Must run by opening the file.
 - Preserve the data model, scoring formula, and placement algorithm documented in the
   PRD (Sections 4.3–4.5). If a change adds fields, migrate existing data; never wipe it.
-- localStorage key is "the-stacks-v1". Don't change it silently.
+- localStorage key is "the-stacks-v2" (the old "the-stacks-v1" is kept as a fallback). Don't change it silently.
 - Maintain the accessibility/quality floor: mobile responsive, visible keyboard focus,
   reduced-motion respected, user input escaped.
 - Match the existing card-catalog visual system and CSS variables.
