@@ -4,7 +4,7 @@ A single-file, offline-first web app for ranking the books you've read by **head
 comparison** instead of star ratings — because a shelf full of 4- and 5-stars stops meaning
 anything.
 
-**Live demo:** _add your Vercel URL here_ · **Runs offline:** just open `index.html`
+**Live demo:** [the-stacks-one.vercel.app](https://the-stacks-one.vercel.app) · **Runs offline:** just open `index.html`
 
 ## The idea
 
