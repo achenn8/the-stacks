@@ -90,12 +90,14 @@
     border:1px solid var(--card-edge); border-left:5px solid var(--tier);
     border-radius:0 var(--radius) var(--radius) 0;
     padding:16px 18px 14px 20px; margin-top:10px; cursor:pointer;
-    display:grid; grid-template-columns:1fr auto; gap:6px 20px;
     box-shadow:0 1px 0 rgba(0,0,0,.12);
     transition:transform .12s ease, box-shadow .12s ease;
   }
   .card:hover{transform:translateY(-1px); box-shadow:0 4px 10px rgba(0,0,0,.18)}
-  .card:focus-visible{outline:2px solid var(--stamp); outline-offset:2px}
+  /* The card has two click zones. This top half holds the title, stamp, meta and
+     tags and opens the detail view; a long note below becomes its own control. */
+  .card-main{display:grid; grid-template-columns:1fr auto; gap:6px 20px}
+  .card-main:focus-visible{outline:2px solid var(--stamp); outline-offset:2px}
   .card .title{
     font-family:"Bitter",serif; font-weight:500; font-size:19px;
     line-height:1.25; color:var(--ink); margin:0; align-self:center;
@@ -104,11 +106,37 @@
     grid-column:1; font-size:12px; color:var(--ink-soft);
     text-transform:uppercase; letter-spacing:.8px; margin-top:2px;
   }
+  /* Bottom click zone. Only becomes a control when the clamp is actually hiding
+     something — markExpandableNotes() measures that after each render. */
   .card .note{
-    grid-column:1/-1; font-family:"Bitter",serif; font-style:italic;
-    font-size:14px; color:var(--ink-soft); line-height:1.4;
-    border-top:1px dashed var(--card-edge); padding-top:8px; margin-top:4px;
+    border-top:1px dashed var(--card-edge); padding-top:8px; margin-top:10px;
   }
+  .card .note.is-expandable{cursor:pointer}
+  .card .note.is-expandable:hover{background:var(--card-2)}
+  .card .note-text{
+    font-family:"Bitter",serif; font-style:italic;
+    font-size:14px; color:var(--ink-soft); line-height:1.4;
+    /* Stops one long unbroken string (a URL, say) widening the card. */
+    overflow-wrap:anywhere;
+    /* Collapsed: three lines, with line breaks falling back to spaces so a
+       paragraph break can't spend the whole preview on blank space. */
+    display:-webkit-box; -webkit-box-orient:vertical; -webkit-line-clamp:3;
+    overflow:hidden;
+  }
+  /* Expanded: the reader's real paragraphs and blank lines, exactly as typed. */
+  .card .note.expanded .note-text{
+    display:block; overflow:visible; white-space:pre-wrap;
+  }
+  /* The real keyboard control. The note band around it is a convenience click
+     area for mouse and touch, so the note text stays plain readable content. */
+  .card .note-more{
+    display:none; margin-top:5px; padding:0;
+    background:none; border:0; cursor:pointer;
+    font-family:"Space Mono",monospace; font-size:11px;
+    text-transform:uppercase; letter-spacing:1px; color:var(--stamp);
+  }
+  .card .note.is-expandable .note-more{display:block}
+  .card .note-more:focus-visible{outline:2px solid var(--stamp); outline-offset:2px}
   /* call-number stamp */
   .stamp{
     grid-row:1/span 2; grid-column:2; align-self:start;
@@ -513,6 +541,9 @@
   // A function (not a shared object) so each reset gets its own fresh genres[] array.
   function freshView(){ return { query:"", sort:"score", tier:"all", genres:[] }; }
   let view = freshView();
+  // Ids whose note the reader has expanded on the card face. Transient like `view`:
+  // never written to storage, so notes are collapsed again after a reload.
+  const expandedNotes = new Set();
 
   function emptyStore(){ return { books:{}, rankings:{loved:[],fine:[],disliked:[]} }; }
   function isValidShape(s){ return s && s.books && s.rankings; }
@@ -814,6 +845,7 @@
       sortIds(ids).forEach(id=> list.appendChild(cardEl(id, id===highlightId)));
       shelfEl.appendChild(list);
     }
+    markExpandableNotes();
   }
 
   function cardEl(id, highlight){
@@ -824,22 +856,73 @@
     const c = document.createElement("div");
     c.className = "card" + (highlight ? " just-filed" : "");
     c.dataset.tier = info.tier; // sets the left-stripe color even outside a drawer
-    c.tabIndex = 0;
-    c.setAttribute("role","button");
-    c.setAttribute("aria-label", b.title + ", " + TIER_META[info.tier].label +
-      ", call number " + score + ", ranked " + gr + " of " + tot + " overall");
     const metaBits = [b.author ? esc(b.author) : "Unknown author"];
     if(b.dateFinished) metaBits.push(b.dateFinished);
-    c.innerHTML =
+
+    // Top zone: the real keyboard control, carrying the card's whole announcement.
+    const main = document.createElement("div");
+    main.className = "card-main";
+    main.tabIndex = 0;
+    main.setAttribute("role","button");
+    main.setAttribute("aria-label", b.title + ", " + TIER_META[info.tier].label +
+      ", call number " + score + ", ranked " + gr + " of " + tot + " overall");
+    main.innerHTML =
       '<h3 class="title">'+esc(b.title)+'</h3>'+
       '<div class="stamp"><span class="num">'+score+'</span>'+
         '<span class="rank">#'+gr+' of '+tot+'</span></div>'+
       '<div class="meta">'+metaBits.join(" · ")+'</div>'+
-      (Array.isArray(b.genres)&&b.genres.length ? '<div class="gtags">'+b.genres.map(g=>'<span class="gtag">'+esc(g)+'</span>').join("")+'</div>' : "")+
-      (b.takeaway ? '<div class="note">“'+esc(b.takeaway)+'”</div>' : "");
+      (Array.isArray(b.genres)&&b.genres.length ? '<div class="gtags">'+b.genres.map(g=>'<span class="gtag">'+esc(g)+'</span>').join("")+'</div>' : "");
+    main.onkeydown = (e)=>{ if(e.key==="Enter"||e.key===" "){ e.preventDefault(); openDetail(id); } };
+    c.appendChild(main);
+
+    // Bottom zone. The "more" cue sits outside .note-text so the clamp can't hide it.
+    if(b.takeaway){
+      const note = document.createElement("div");
+      note.className = "note";
+      note.dataset.id = id;
+      note.innerHTML = '<div class="note-text">“'+esc(b.takeaway)+'”</div>'+
+                       '<button type="button" class="note-more" aria-expanded="false"></button>';
+      c.appendChild(note);
+    }
+
+    // Clicking anywhere the note hasn't claimed opens the detail view, so the
+    // card's padding and rim stay live exactly as before.
     c.onclick = ()=>openDetail(id);
-    c.onkeydown = (e)=>{ if(e.key==="Enter"||e.key===" "){ e.preventDefault(); openDetail(id); } };
     return c;
+  }
+
+  // A note is only promoted to its own control when the 3-line clamp is really
+  // hiding text. Runs after cards are in the document, because it measures layout.
+  function markExpandableNotes(){
+    shelfEl.querySelectorAll(".card .note").forEach(note=>{
+      const txt = note.querySelector(".note-text");
+      note.classList.remove("expanded");           // measure the collapsed height
+      if(txt.scrollHeight <= txt.clientHeight + 1){
+        note.classList.remove("is-expandable");
+        note.onclick = null;
+        return;
+      }
+      note.classList.add("is-expandable");
+      applyNoteState(note, expandedNotes.has(note.dataset.id));
+      // Band click is the touch/mouse convenience; the button below is the
+      // control keyboard and screen-reader users actually land on.
+      note.onclick = (e)=>{ e.stopPropagation(); toggleNote(note); };
+      note.querySelector(".note-more").onclick = (e)=>{ e.stopPropagation(); toggleNote(note); };
+    });
+  }
+
+  function applyNoteState(note, open){
+    note.classList.toggle("expanded", open);
+    const btn = note.querySelector(".note-more");
+    btn.setAttribute("aria-expanded", open ? "true" : "false");
+    btn.textContent = open ? "less" : "more";
+  }
+
+  function toggleNote(note){
+    const id = note.dataset.id;
+    const open = !expandedNotes.has(id);
+    if(open) expandedNotes.add(id); else expandedNotes.delete(id);
+    applyNoteState(note, open);
   }
 
   // ---- Genres (tag picker shared by the add flow and the detail view) ----
