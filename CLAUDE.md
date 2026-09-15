@@ -37,10 +37,12 @@ Full requirements are in `PRD-the-stacks.md`; the online addendum is in `PRD-v2-
   may be added without being asked. A pure-offline snapshot lives in `the-stacks-v1.html`.
 - Preserve the data model, scoring formula, and placement algorithm documented in the
   PRD (Sections 4.3–4.5). If a change adds fields, migrate existing data; never wipe it.
-- localStorage key is `"the-stacks-v2"` (localStorage = a small storage area in the browser
-  where the app keeps your data on your own device). The old `"the-stacks-v1"` key is kept
-  untouched on disk as a fallback. Don't change the key silently; if the schema version
-  changes again, bump it deliberately and migrate old data (v2 was the first such bump).
+- localStorage key is `"the-stacks-v3"` (localStorage = a small storage area in the browser
+  where the app keeps your data on your own device). The older `"the-stacks-v2"` and
+  `"the-stacks-v1"` keys are kept untouched on disk as fallbacks. `load()` walks that chain
+  newest-first and migrates a COPY forward. Don't change the key silently; if the schema
+  version changes again, bump it deliberately and migrate old data (v2 added genres, v3
+  added `addedOn`).
 - Maintain the accessibility/quality floor: mobile responsive, visible keyboard focus,
   reduced-motion respected, user input escaped (Section 4.6).
 - Match the existing card-catalog visual system and CSS variables. New UI should look like
@@ -139,6 +141,28 @@ key, scoring formula, quality floor all present).
   live: HTTPS, app renders, localStorage persists on the real origin. README "Live demo" line
   carries the URL. `the-stacks-v1.html` is now **gitignored** (offline snapshot stays local,
   never deployed).
+
+- **Notes keep their line breaks; cards split into two click zones — DONE (commit `244724b`,
+  not yet pushed).** The note field was always a `<textarea>` with no length limit, but HTML
+  collapsed the line breaks on display. Cards are now two sibling controls: a `.card-main`
+  wrapper (holds the grid, opens the detail view, carries the card's full `aria-label`) and
+  the note below the dashed rule. Collapsed, a note clamps to 3 lines with breaks falling
+  back to spaces so a paragraph break can't spend the preview on blank space; expanded, real
+  paragraphs are preserved. The more/less cue sits OUTSIDE the clamped text (or the clamp
+  would hide it) and is a real `<button>` for keyboard/screen readers, while the note band is
+  a convenience click area for mouse/touch — deliberately avoiding a control inside a control.
+  A note is only promoted to a control when the clamp actually hides something. Expanded
+  state is transient like `view`.
+- **Date finished vs date added — DONE (schema v3, not yet committed).** Before this, both
+  `dateFinished` and `finishedOn` were set silently to *today*, so the app called it a finish
+  date when it was really the logging date. Now: `finishedOn` is user-chosen (native
+  `<input type="date">`, capped at today, clearable) in both the add flow and the detail view;
+  `dateFinished` is always derived from it via `displayFromIso()`; and a new **`addedOn`**
+  records when the entry was created. `addedOn` is a full ISO **timestamp**, not a date —
+  day-precision would collapse "Recently added" into A–Z order for a bulk import. Migration
+  sets `addedOn` from the old `finishedOn`, which is accurate since that value *was* the
+  logging date. Sort gained **"Recently added"**; undated books still sort last in both
+  directions. No finish date means no date on the card — never an invented one.
 
 ## Deferred (not yet built)
 Two ideas parked with agreed designs (the v2 title autocomplete has shipped; these haven't) —

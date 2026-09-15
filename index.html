@@ -282,6 +282,17 @@
   .d-author-input::placeholder{color:var(--ink-faint)}
   .d-title-input:focus-visible, .d-author-input:focus-visible{outline:2px solid var(--stamp); outline-offset:3px; border-bottom-color:transparent}
   .d-date{font-size:11px; text-transform:uppercase; letter-spacing:1px; color:var(--ink-faint); margin-top:6px}
+  /* Finish date, editable in place like the title and author above it. */
+  .d-date-input{
+    font-family:"Space Mono",monospace; font-size:11px; text-transform:uppercase; letter-spacing:1px;
+    color:var(--ink-faint); background:transparent; border:none; border-bottom:1px dashed var(--card-edge);
+    padding:3px 0; margin-top:6px; max-width:100%;
+  }
+  .d-date-input:focus-visible{outline:2px solid var(--stamp); outline-offset:3px; border-bottom-color:transparent}
+  .d-date-lab{
+    display:block; font-family:"Space Mono",monospace; font-size:10px;
+    text-transform:uppercase; letter-spacing:1px; color:var(--ink-faint); margin-top:8px;
+  }
   /* inline "Re-rank" action on the Filed line */
   .inline-act{
     font-family:"Space Mono",monospace; font-size:11px; font-weight:700;
@@ -484,6 +495,7 @@
           <option value="score">By score</option>
           <option value="newest">Newest finished</option>
           <option value="oldest">Oldest finished</option>
+          <option value="added">Recently added</option>
           <option value="title">Title A–Z</option>
           <option value="author">Author A–Z</option>
         </select>
@@ -517,8 +529,9 @@
   "use strict";
 
   // ---- Config ----
-  const KEY = "the-stacks-v2";       // current schema (books have genres[] + finishedOn)
-  const KEY_V1 = "the-stacks-v1";    // previous schema; kept untouched on disk as a fallback
+  const KEY = "the-stacks-v3";       // current schema (books also carry addedOn)
+  const KEY_V2 = "the-stacks-v2";    // genres[] + finishedOn
+  const KEY_V1 = "the-stacks-v1";    // original; both older keys stay on disk as fallbacks
   const TIERS = ["loved","fine","disliked"];
   const TIER_META = {
     loved:    { label:"Loved it",      band:[7.0,10.0], sub:"couldn't stop thinking about it" },
@@ -527,6 +540,8 @@
   };
   // Month name -> 0-based index (used by both the migration and the date sort).
   const MONTHS = {jan:0,feb:1,mar:2,apr:3,may:4,jun:5,jul:6,aug:7,sep:8,oct:9,nov:10,dec:11};
+  // "Jan".."Dec", derived from MONTHS so the two lists can never drift apart.
+  const MONTH_NAMES = Object.keys(MONTHS).map(m => m[0].toUpperCase() + m.slice(1));
   // Suggested genres shown as chips; the reader's own genres get added to these on the fly.
   const STARTER_GENRES = ["Literary Fiction","Fantasy","Sci-Fi","Mystery & Thriller","Romance","Horror","Poetry","Historical","Nonfiction","Memoir","Science","Philosophy"];
   const MAX_GENRES = 3; // a book can carry at most this many genres
@@ -556,6 +571,23 @@
     return m[2] + "-" + String(MONTHS[m[1]]+1).padStart(2,"0") + "-01";
   }
 
+  // Today as "YYYY-MM-DD" in the reader's own timezone. Built by hand rather than
+  // from toISOString(), which is UTC and can report tomorrow late in the evening.
+  function isoToday(){
+    const d = new Date();
+    return d.getFullYear() + "-" + String(d.getMonth()+1).padStart(2,"0") +
+           "-" + String(d.getDate()).padStart(2,"0");
+  }
+
+  // "2026-08-18" -> "Aug 2026", for the display string on cards. Parsed by hand
+  // because new Date("2026-08-18") is read as UTC and can slip to the month before.
+  // Tolerates a trailing time, so it also works on the addedOn timestamp.
+  function displayFromIso(iso){
+    const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(iso||"");
+    if(!m) return "";
+    return (MONTH_NAMES[+m[2]-1] || "") + " " + m[1];
+  }
+
   // Upgrade any store to the current schema: every book gets genres[] and finishedOn.
   // Additive only — existing fields are never removed or changed. Idempotent (safe to
   // run on already-migrated data), so it also self-heals partial records.
@@ -565,6 +597,9 @@
       const b = s.books[id];
       if(!Array.isArray(b.genres)) b.genres = [];
       if(!b.finishedOn) b.finishedOn = isoFromDisplay(b.dateFinished);
+      // v3: before this version the "finished" date was set silently to the day
+      // the book was logged, so reusing it as addedOn is accurate — not a guess.
+      if(!b.addedOn) b.addedOn = b.finishedOn || "";
     });
     return s;
   }
@@ -572,21 +607,21 @@
   // Load order: current v2 key first; else migrate a COPY of the old v1 data into v2
   // (leaving v1 untouched on disk as a fallback); else start empty.
   function load(){
-    try{
-      const rawV2 = localStorage.getItem(KEY);
-      if(rawV2){ const s = JSON.parse(rawV2); if(isValidShape(s)) return migrate(s); }
-    }catch(e){}
-    try{
-      const rawV1 = localStorage.getItem(KEY_V1);
-      if(rawV1){
-        const old = JSON.parse(rawV1);
-        if(isValidShape(old)){
-          const upgraded = migrate(old);
-          try{ localStorage.setItem(KEY, JSON.stringify(upgraded)); }catch(e){}
-          return upgraded; // v1 string is left in place as a fallback
-        }
-      }
-    }catch(e){}
+    // Newest schema first, then fall back through the older keys. Anything older
+    // is migrated into a COPY written to the current key; the old strings are
+    // left untouched on disk so a bad migration is always recoverable.
+    const chain = [KEY, KEY_V2, KEY_V1];
+    for(let i = 0; i < chain.length; i++){
+      try{
+        const raw = localStorage.getItem(chain[i]);
+        if(!raw) continue;
+        const s = JSON.parse(raw);
+        if(!isValidShape(s)) continue;
+        const upgraded = migrate(s);
+        if(i > 0){ try{ localStorage.setItem(KEY, JSON.stringify(upgraded)); }catch(e){} }
+        return upgraded;
+      }catch(e){}
+    }
     return emptyStore();
   }
   function save(){
@@ -654,6 +689,13 @@
     return b.finishedOn || isoFromDisplay(b.dateFinished) || "";
   }
 
+  // When the entry was logged, which is a different question from when the book
+  // was finished. Pre-v3 records fall back to the finish date, because that is
+  // literally what that value used to be.
+  function addedSortKey(b){
+    return b.addedOn || dateSortKey(b);
+  }
+
   // Ids passing the current tier + author + search filters, in tier/rank order.
   function visibleIds(){
     const q = view.query.trim();
@@ -682,10 +724,11 @@
     const arr = ids.slice();
     if(view.sort==="title")  return arr.sort((a,b)=> byTitle(a,b) || byAuthor(a,b));
     if(view.sort==="author") return arr.sort(byAuthor);
-    if(view.sort==="newest" || view.sort==="oldest"){
-      const dir = view.sort==="newest" ? -1 : 1;
+    if(view.sort==="newest" || view.sort==="oldest" || view.sort==="added"){
+      const dir = view.sort==="oldest" ? 1 : -1;
+      const keyOf = view.sort==="added" ? addedSortKey : dateSortKey;
       return arr.sort((a,b)=>{
-        const ka=dateSortKey(store.books[a]), kb=dateSortKey(store.books[b]);
+        const ka=keyOf(store.books[a]), kb=keyOf(store.books[b]);
         if(ka===kb) return byTitle(a,b);
         if(!ka) return 1;                    // undated last, both directions
         if(!kb) return -1;
@@ -1127,7 +1170,8 @@
 
   // ---- Add flow ----
   function openAdd(){
-    flow = { mode:"add", step:"meta", title:"", author:"", takeaway:"", tier:null, genres:[] };
+    flow = { mode:"add", step:"meta", title:"", author:"", takeaway:"", tier:null,
+             genres:[], finishedOn: isoToday() };
     renderFlow(); openModal();
   }
   document.getElementById("addBtn").onclick = openAdd;
@@ -1269,6 +1313,8 @@
         '</div>'+
       '</div>'+
       '<label class="fld"><span>Author</span><input id="f-author" value="'+esc(flow.author)+'" autocomplete="off"></label>'+
+      '<label class="fld"><span>Finished on — optional</span>'+
+        '<input type="date" id="f-date" value="'+esc(flow.finishedOn||"")+'" max="'+isoToday()+'"></label>'+
       '<label class="fld"><span>A line to remember it by — optional</span>'+
         '<textarea id="f-take" rows="2" placeholder="one thought, a favorite quote, why it stuck">'+esc(flow.takeaway)+'</textarea></label>'+
       '<div class="gsection"><span class="gsection-lab">Genres — optional (up to '+MAX_GENRES+')</span><div id="genreBox"></div></div>'+
@@ -1292,6 +1338,7 @@
       flow.title = t;
       flow.author = document.getElementById("f-author").value.trim();
       flow.takeaway = document.getElementById("f-take").value.trim();
+      flow.finishedOn = document.getElementById("f-date").value; // "" if cleared
       flow.step = "tier";
       renderFlow();
     };
@@ -1371,14 +1418,16 @@
       store.rankings[old] = store.rankings[old].filter(x => x !== id);
       store.books[id].tier = flow.tier;
     } else {
-      const now = new Date();
-      const iso = now.getFullYear() + "-" + String(now.getMonth()+1).padStart(2,"0") + "-" + String(now.getDate()).padStart(2,"0");
       id = "b" + Date.now().toString(36) + Math.floor(Math.random()*1e4).toString(36);
+      const fin = flow.finishedOn || "";   // the reader's own date, or none at all
       store.books[id] = {
         id, title:flow.title, author:flow.author, takeaway:flow.takeaway, tier:flow.tier,
         genres: Array.isArray(flow.genres) ? flow.genres : [],
-        dateFinished: now.toLocaleDateString("en-US",{month:"short",year:"numeric"}),
-        finishedOn: iso
+        dateFinished: displayFromIso(fin), // derived; "" when no finish date is set
+        finishedOn: fin,
+        // Full timestamp, not just the day: a bulk import lands many books on one
+        // date, and day-precision would collapse "Recently added" into A-Z order.
+        addedOn: new Date().toISOString()
       };
     }
     const arr = store.rankings[flow.tier];
@@ -1432,7 +1481,9 @@
             '<div class="suggest" id="d-suggest" role="listbox" aria-label="Title suggestions" hidden></div>'+
           '</div>'+
           '<input id="d-author" class="d-author-input" value="'+esc(b.author||"")+'" placeholder="Add author" aria-label="Author" autocomplete="off">'+
-          (b.dateFinished ? '<div class="d-date">'+esc(b.dateFinished)+'</div>' : '')+
+          '<label class="d-date-lab">Finished on'+
+            '<input type="date" id="d-date" class="d-date-input" value="'+esc(b.finishedOn||"")+'" max="'+isoToday()+'">'+
+          '</label>'+
         '</div>'+
         '<div class="detail-stamp" data-tier="'+b.tier+'"><span class="num">'+score+'</span>'+
           '<span class="rank">#'+rank+' of '+totalBooks()+'</span></div>'+
@@ -1467,6 +1518,9 @@
       store.books[id].title = t;
       store.books[id].author = document.getElementById("d-author").value.trim();
       store.books[id].takeaway = document.getElementById("d-take").value.trim();
+      const fin = document.getElementById("d-date").value; // "" if the reader cleared it
+      store.books[id].finishedOn = fin;
+      store.books[id].dateFinished = displayFromIso(fin);  // keep the display string in step
       store.books[id].genres = flow.genres.slice();
       save(); const hl=id; closeModal(); render(hl);
     };
