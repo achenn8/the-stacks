@@ -164,6 +164,31 @@ key, scoring formula, quality floor all present).
   logging date. Sort gained **"Recently added"**; undated books still sort last in both
   directions. No finish date means no date on the card — never an invented one.
 
+- **Goodreads import — DONE (not yet committed).** Footer gains "Import from Goodreads"
+  (`.csv`). Runs ENTIRELY in the browser; the file is never uploaded. Goodreads retired its
+  public API (no new keys since Dec 2020), so the CSV a reader exports themselves is the only
+  sanctioned route — **do not add an API integration, it does not exist.**
+  - **Hand-written quote-aware CSV reader** (`parseCsvRows`): quoted fields, commas AND
+    newlines inside quotes, `""` escapes, BOM strip. Splitting on commas corrupts reviews.
+  - **Mapping.** Only `Exclusive Shelf == "read"` is eligible. `My Rating` parses as a NUMBER
+    (Goodreads writes `"5.0"`, not `"5"`): ≥4 → loved · 3 → fine · 1–2 → disliked · 0 →
+    skipped and NAMED in the summary (an unrated book carries no signal; better the reader
+    logs it and gives a real gut-check). `Date Read` → `finishedOn`, `Date Added` → `addedOn`
+    (both truthful; blank stays blank, never invented). `My Review` → `takeaway` KEPT WHOLE —
+    no truncation, since notes have no length limit and render paragraphs.
+  - **Shelves → genres was CUT.** 0 of the user's 107 read books carry a shelf (all 47 shelved
+    rows are on to-read), so it would have been dead code. Genres stay manual.
+  - **Placement.** Provisional order within a tier: rating desc → finishedOn desc → title A–Z,
+    appended BELOW everything already hand-ranked. Binary-search placement would have meant
+    ~1,500 forced comparisons for a 200-book import.
+  - **`provisional: true`** marks imported books ("not yet ranked by you" on the card) and is
+    deleted on re-rank. Deliberately NO key bump: an optional field whose absence is the
+    correct default needs no migration (PRD §9 — bump only for significant changes).
+  - **Dedupe** on normalised `title|author` (via `gkey()`), both within the file and against
+    the catalog — catches the same book in two Goodreads editions, which a Book Id match misses.
+  - **Preview before any write**, and the import ADDS rather than replaces (unlike the JSON
+    restore). Wrong file → header check with a message saying where to get the real export.
+
 ## Deferred (not yet built)
 Two ideas parked with agreed designs (the v2 title autocomplete has shipped; these haven't) —
 details in the auto-memory roadmap notes:

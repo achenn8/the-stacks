@@ -106,6 +106,14 @@
     grid-column:1; font-size:12px; color:var(--ink-soft);
     text-transform:uppercase; letter-spacing:.8px; margin-top:2px;
   }
+  /* Imported books were placed by their star rating, not by the reader. The
+     dashed outline says "provisional" without shouting. */
+  .card .prov{
+    grid-column:1; justify-self:start; margin-top:7px;
+    font-family:"Space Mono",monospace; font-size:10px;
+    text-transform:uppercase; letter-spacing:1px; color:var(--ink-faint);
+    border:1px dashed var(--card-edge); border-radius:2px; padding:2px 6px;
+  }
   /* Bottom click zone. Only becomes a control when the clamp is actually hiding
      something — markExpandableNotes() measures that after each render. */
   .card .note{
@@ -517,7 +525,9 @@
   <footer class="vault" aria-label="Backup and restore">
     <button class="vault-btn" id="exportBtn">Export catalog</button>
     <button class="vault-btn" id="importBtn">Import catalog</button>
+    <button class="vault-btn" id="grBtn">Import from Goodreads</button>
     <input type="file" id="importFile" accept="application/json,.json" hidden>
+    <input type="file" id="grFile" accept=".csv,text/csv" hidden>
   </footer>
 
   <div class="scrim" id="scrim" role="dialog" aria-modal="true" aria-labelledby="sheetTitle">
@@ -914,6 +924,7 @@
       '<div class="stamp"><span class="num">'+score+'</span>'+
         '<span class="rank">#'+gr+' of '+tot+'</span></div>'+
       '<div class="meta">'+metaBits.join(" · ")+'</div>'+
+      (b.provisional ? '<div class="prov">not yet ranked by you</div>' : "")+
       (Array.isArray(b.genres)&&b.genres.length ? '<div class="gtags">'+b.genres.map(g=>'<span class="gtag">'+esc(g)+'</span>').join("")+'</div>' : "");
     main.onkeydown = (e)=>{ if(e.key==="Enter"||e.key===" "){ e.preventDefault(); openDetail(id); } };
     c.appendChild(main);
@@ -1417,6 +1428,7 @@
       const old = store.books[id].tier;
       store.rankings[old] = store.rankings[old].filter(x => x !== id);
       store.books[id].tier = flow.tier;
+      delete store.books[id].provisional; // re-ranking is the reader claiming the position
     } else {
       id = "b" + Date.now().toString(36) + Math.floor(Math.random()*1e4).toString(36);
       const fin = flow.finishedOn || "";   // the reader's own date, or none at all
@@ -1633,6 +1645,235 @@
     };
     openModal();
     document.getElementById("ic-cancel").focus();
+  }
+
+  // ---- Goodreads import ----------------------------------------------------
+  // Goodreads retired its public API (no new keys since 2020), so the only
+  // sanctioned route is the CSV a reader exports themselves. Everything here runs
+  // in the browser — the file is never uploaded anywhere.
+
+  // Minimal RFC-4180 reader: quoted fields, commas AND newlines inside quotes,
+  // and doubled "" escapes. Written by hand because splitting on commas corrupts
+  // any review containing one, which is common.
+  function parseCsvRows(text){
+    if(text.charCodeAt(0) === 0xFEFF) text = text.slice(1); // strip UTF-8 BOM
+    const rows = []; let row = [], field = "", inQuotes = false;
+    for(let i = 0; i < text.length; i++){
+      const ch = text[i];
+      if(inQuotes){
+        if(ch === '"'){
+          if(text[i+1] === '"'){ field += '"'; i++; } else inQuotes = false;
+        } else field += ch;
+        continue;
+      }
+      if(ch === '"'){ inQuotes = true; continue; }
+      if(ch === ','){ row.push(field); field = ""; continue; }
+      if(ch === '\r') continue;                       // CRLF handled on the \n
+      if(ch === '\n'){ row.push(field); rows.push(row); row = []; field = ""; continue; }
+      field += ch;
+    }
+    if(field !== "" || row.length){ row.push(field); rows.push(row); }
+    return rows;
+  }
+
+  function parseCsv(text){
+    const rows = parseCsvRows(text)
+      .filter(r => r.length && !(r.length === 1 && r[0].trim() === ""));
+    if(!rows.length) return { headers:[], records:[] };
+    const headers = rows[0].map(h => h.trim());
+    const records = rows.slice(1).map(r=>{
+      const o = {};
+      headers.forEach((h,i)=> o[h] = (r[i] === undefined ? "" : r[i]));
+      return o;
+    });
+    return { headers, records };
+  }
+
+  const GR_REQUIRED = ["Title","Author","My Rating","Exclusive Shelf"];
+
+  // Goodreads writes "2026/08/18"; we store "2026-08-18". Blank stays blank —
+  // a missing date is left missing rather than invented.
+  function grDateToIso(s){
+    const m = /^(\d{4})[\/-](\d{1,2})[\/-](\d{1,2})$/.exec((s||"").trim());
+    return m ? m[1]+"-"+String(+m[2]).padStart(2,"0")+"-"+String(+m[3]).padStart(2,"0") : "";
+  }
+
+  // Ratings arrive as "5.0", not "5", so parse as a number. 0 means unrated.
+  function grTier(rating){
+    const n = parseFloat(rating);
+    if(!isFinite(n) || n <= 0) return null;
+    if(n >= 4) return "loved";
+    if(n >= 3) return "fine";
+    return "disliked";
+  }
+
+  // Same tolerance as the genre matcher, so "Six of Crows" in two editions collapses.
+  function bookKey(title, author){ return gkey(title) + "|" + gkey(author); }
+
+  // Goodreads stores reviews as HTML, so a line break arrives as the literal text
+  // "<br/>". Convert that to real text HERE, at import. Rendering still escapes
+  // everything (see esc()) — markup from a file is never injected into the page.
+  function grHtmlToText(s){
+    if(!s) return "";
+    return String(s)
+      .replace(/<br\s*\/?>/gi, "\n")      // the common case
+      .replace(/<\/p\s*>/gi, "\n\n")
+      .replace(/<[^>]+>/g, "")            // drop any other markup, keep its text
+      .replace(/&nbsp;/gi, " ")
+      .replace(/&quot;/gi, '"')
+      .replace(/&#0?39;|&apos;/gi, "'")
+      .replace(/&lt;/gi, "<")
+      .replace(/&gt;/gi, ">")
+      .replace(/&amp;/gi, "&")            // last, so "&amp;lt;" stays literal
+      .trim();
+  }
+
+  function planGoodreadsImport(records){
+    const plan = { add:[], total:records.length, notRead:0, unrated:[], dupeInFile:0, alreadyHere:0 };
+    const existing = new Set();
+    Object.keys(store.books).forEach(id=>{
+      const b = store.books[id];
+      existing.add(bookKey(b.title, b.author));
+    });
+    const seen = new Set();
+    records.forEach(r=>{
+      if((r["Exclusive Shelf"]||"").trim().toLowerCase() !== "read"){ plan.notRead++; return; }
+      const title = (r["Title"]||"").trim();
+      if(!title) return;
+      const author = (r["Author"]||"").trim();
+      const tier = grTier(r["My Rating"]);
+      if(!tier){ plan.unrated.push(title); return; }   // read but never rated: no signal
+      const key = bookKey(title, author);
+      if(seen.has(key)){ plan.dupeInFile++; return; }
+      seen.add(key);
+      if(existing.has(key)){ plan.alreadyHere++; return; }
+      plan.add.push({
+        title, author,
+        takeaway: grHtmlToText(r["My Review"]),        // kept whole; notes have no limit
+        tier,
+        finishedOn: grDateToIso(r["Date Read"]),       // often blank on Goodreads
+        addedOn: grDateToIso(r["Date Added"]),         // when it was shelved there
+        rating: parseFloat(r["My Rating"]) || 0
+      });
+    });
+    return plan;
+  }
+
+  // Provisional order inside a tier: best rating first, then most recently
+  // finished, then A-Z so the result is stable rather than arbitrary.
+  function orderForTier(list){
+    return list.slice().sort((a,b)=>{
+      if(b.rating !== a.rating) return b.rating - a.rating;
+      const fa = a.finishedOn || "", fb = b.finishedOn || "";
+      if(fa !== fb) return fa < fb ? 1 : -1;
+      return a.title.localeCompare(b.title, undefined, {sensitivity:"base"});
+    });
+  }
+
+  function applyGoodreadsImport(plan){
+    let n = 0;
+    TIERS.forEach(tier=>{
+      orderForTier(plan.add.filter(x => x.tier === tier)).forEach(entry=>{
+        const id = "g" + Date.now().toString(36) + (n++).toString(36) +
+                   Math.floor(Math.random()*1e4).toString(36);
+        store.books[id] = {
+          id, title:entry.title, author:entry.author, takeaway:entry.takeaway,
+          tier, genres: [],
+          finishedOn: entry.finishedOn,
+          dateFinished: displayFromIso(entry.finishedOn),
+          addedOn: entry.addedOn || isoToday(),
+          // Placed by star rating, not by you. Cleared the moment it's re-ranked.
+          provisional: true
+        };
+        store.rankings[tier].push(id);  // below everything already ranked by hand
+      });
+    });
+    save();
+  }
+
+  function goodreadsSummary(plan){
+    const byTier = t => plan.add.filter(x => x.tier === t).length;
+    const noDate = plan.add.filter(x => !x.finishedOn).length;
+    const skips = [];
+    if(plan.notRead)     skips.push(plan.notRead + " not marked read on Goodreads");
+    if(plan.unrated.length) skips.push(plan.unrated.length + " read but never rated");
+    if(plan.alreadyHere) skips.push(plan.alreadyHere + " already in your stacks");
+    if(plan.dupeInFile)  skips.push(plan.dupeInFile + " repeated in the file");
+    return { byTier, noDate, skips };
+  }
+
+  function confirmGoodreadsImport(plan){
+    flow = null;
+    const s = goodreadsSummary(plan);
+    const n = plan.add.length;
+    if(!n){
+      sheet.innerHTML =
+        '<h2 id="sheetTitle">Nothing to import</h2>'+
+        '<p class="step-tag">Nothing was changed</p>'+
+        '<p class="modal-copy">This export has <b>'+plan.total+'</b> rows, but none of them '+
+          'are rated books marked <b>read</b> that aren\'t already in your stacks.</p>'+
+        '<div class="row"><button class="btn primary" id="gr-ok">OK</button></div>';
+      document.getElementById("gr-ok").onclick = closeModal;
+      openModal(); document.getElementById("gr-ok").focus();
+      return;
+    }
+    sheet.innerHTML =
+      '<h2 id="sheetTitle">Import '+n+' book'+(n===1?'':'s')+' from Goodreads?</h2>'+
+      '<p class="step-tag">Nothing is written until you confirm</p>'+
+      '<p class="modal-copy">Found <b>'+plan.total+'</b> rows in this export. '+
+        'These are <b>added</b> to your catalog — nothing you already have is replaced.</p>'+
+      '<p class="modal-copy"><b>'+s.byTier("loved")+'</b> Loved it · '+
+        '<b>'+s.byTier("fine")+'</b> It was fine · '+
+        '<b>'+s.byTier("disliked")+'</b> Didn\'t like it</p>'+
+      (s.skips.length ? '<p class="modal-copy soft">Skipping '+esc(s.skips.join(" · "))+'.</p>' : '')+
+      (plan.unrated.length ? '<p class="modal-copy soft">Unrated, so worth logging yourself for a real gut check: '+
+        esc(plan.unrated.slice(0,3).join("; "))+(plan.unrated.length>3 ? ' and '+(plan.unrated.length-3)+' more' : '')+'.</p>' : '')+
+      '<p class="modal-copy soft">Imported books are placed by their star rating and marked '+
+        '<b>not yet ranked</b> until you re-rank them yourself.'+
+        (s.noDate ? ' '+s.noDate+' have no finish date on Goodreads, so they\'ll show no date rather than a made-up one.' : '')+'</p>'+
+      '<div class="row">'+
+        '<button class="btn ghost" id="gr-cancel">Cancel</button>'+
+        '<button class="btn primary" id="gr-confirm">Add '+n+' book'+(n===1?'':'s')+'</button>'+
+      '</div>';
+    document.getElementById("gr-cancel").onclick = closeModal;
+    document.getElementById("gr-confirm").onclick = ()=>{
+      applyGoodreadsImport(plan); closeModal(); resetView(); render();
+    };
+    openModal();
+    document.getElementById("gr-cancel").focus();
+  }
+
+  const grInput = document.getElementById("grFile");
+  document.getElementById("grBtn").onclick = ()=> grInput.click();
+  grInput.onchange = ()=>{
+    const file = grInput.files && grInput.files[0];
+    if(!file) return;
+    const reader = new FileReader();
+    reader.onload = ()=>{
+      grInput.value = "";
+      let parsed;
+      try{ parsed = parseCsv(String(reader.result)); }
+      catch(e){ return showGoodreadsError("That file couldn't be read as a CSV."); }
+      const missing = GR_REQUIRED.filter(h => parsed.headers.indexOf(h) === -1);
+      if(missing.length) return showGoodreadsError("This CSV is missing the column" +
+        (missing.length===1?" ":"s ") + missing.join(", ") + ", so it isn't a Goodreads export.");
+      confirmGoodreadsImport(planGoodreadsImport(parsed.records));
+    };
+    reader.onerror = ()=>{ grInput.value=""; showGoodreadsError("The file couldn't be read."); };
+    reader.readAsText(file);
+  };
+
+  function showGoodreadsError(msg){
+    flow = null;
+    sheet.innerHTML =
+      '<h2 id="sheetTitle">That didn\'t look like a Goodreads export</h2>'+
+      '<p class="step-tag">Nothing was changed</p>'+
+      '<p class="modal-copy">'+esc(msg)+'</p>'+
+      '<p class="modal-copy soft">On Goodreads, go to <b>My Books</b> → <b>Import and export</b> '+
+        '→ <b>Export Library</b>, then open the ".csv" it makes for you.</p>'+
+      '<div class="row"><button class="btn primary" id="gre-ok">OK</button></div>';
+    document.getElementById("gre-ok").onclick = closeModal;
+    openModal(); document.getElementById("gre-ok").focus();
   }
 
   // ---- Findability controls wiring ----
