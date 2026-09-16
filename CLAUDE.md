@@ -194,6 +194,13 @@ key, scoring formula, quality floor all present).
     the catalog — catches the same book in two Goodreads editions, which a Book Id match misses.
   - **Preview before any write**, and the import ADDS rather than replaces (unlike the JSON
     restore). Wrong file → header check with a message saying where to get the real export.
+  - **The button opens a how-to panel, not the file picker.** A first-timer has no file yet
+    and no way to know they need one, so the picker alone was a dead end. The panel lists the
+    four Goodreads steps, says the download must be done on a computer (the Goodreads phone
+    app doesn't offer it), states that the file never leaves the device, and ends in "Choose
+    file". A hover tooltip was considered and rejected: hover doesn't exist on touch, and it
+    vanishes the moment you leave to follow the steps. Copy deliberately avoids commenting on
+    Goodreads' API decisions — that's technical and reads as a swipe at another product.
 
 - **Holding area for unrated books ("Read, not yet filed") — DONE (not yet committed).**
   Found by the user thinking about a friend who rates nothing on Goodreads: as first built,
