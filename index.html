@@ -331,11 +331,15 @@
   .d-date-input{
     font-family:"Space Mono",monospace; font-size:11px; text-transform:uppercase; letter-spacing:1px;
     color:var(--ink-faint); background:transparent; border:none; border-bottom:1px dashed var(--card-edge);
-    padding:3px 0; margin-top:6px; max-width:100%;
+    padding:3px 0; max-width:100%;
   }
   .d-date-input:focus-visible{outline:2px solid var(--stamp); outline-offset:3px; border-bottom-color:transparent}
+  /* A flex row so the label and the date keep a real gap between them — relying on
+     whitespace in the markup gives none at all. Wraps rather than colliding if the
+     date control is wide on a narrow screen. */
   .d-date-lab{
-    display:block; font-family:"Space Mono",monospace; font-size:10px;
+    display:flex; align-items:baseline; gap:8px; flex-wrap:wrap;
+    font-family:"Space Mono",monospace; font-size:10px;
     text-transform:uppercase; letter-spacing:1px; color:var(--ink-faint); margin-top:8px;
   }
   /* inline "Re-rank" action on the Filed line */
@@ -2050,7 +2054,7 @@
       sheet.innerHTML =
         '<h2 id="sheetTitle">Nothing to import</h2>'+
         '<p class="step-tag">Nothing was changed</p>'+
-        '<p class="modal-copy">This export has <b>'+plan.total+'</b> rows, but none of them '+
+        '<p class="modal-copy">This export has <b>'+plan.total+'</b> '+(plan.total===1?'row':'rows')+', but none of them '+
           'are books marked <b>read</b> that aren\'t already in your stacks.</p>'+
         '<div class="row"><button class="btn primary" id="gr-ok">OK</button></div>';
       document.getElementById("gr-ok").onclick = closeModal;
@@ -2063,7 +2067,7 @@
     sheet.innerHTML =
       '<h2 id="sheetTitle">'+headline+'</h2>'+
       '<p class="step-tag">Nothing is written until you confirm</p>'+
-      '<p class="modal-copy">Found <b>'+plan.total+'</b> rows in this export. '+
+      '<p class="modal-copy">Found <b>'+plan.total+'</b> '+(plan.total===1?'row':'rows')+' in this export. '+
         'These are <b>added</b> to your catalog — nothing you already have is replaced.</p>'+
       (n ? '<p class="modal-copy"><b>'+s.byTier("loved")+'</b> Loved it · '+
         '<b>'+s.byTier("fine")+'</b> It was fine · '+
