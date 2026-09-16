@@ -45,6 +45,12 @@ Full requirements are in `PRD-the-stacks.md`; the online addendum is in `PRD-v2-
   added `addedOn`).
 - Maintain the accessibility/quality floor: mobile responsive, visible keyboard focus,
   reduced-motion respected, user input escaped (Section 4.6).
+- **Keep `[hidden]{display:none !important}` at the top of the stylesheet.** Several
+  controls are shown/hidden with `el.hidden = …` (the toolbar, the genre chip, the
+  needs-ranking chip), and each of them also sets `display` via a class
+  (`.chip{display:inline-flex}` etc). An author `display` rule outranks the browser's own
+  `[hidden]` rule, so without this line `el.hidden = true` silently does nothing and the
+  control stays on screen. This shipped as a live bug on all three before it was caught.
 - Match the existing card-catalog visual system and CSS variables. New UI should look like
   it was always there.
 - Vanilla HTML/CSS/JS only. The point is a file I fully understand.

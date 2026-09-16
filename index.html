@@ -18,6 +18,11 @@
   }
   *{box-sizing:border-box}
   html,body{margin:0;padding:0}
+  /* The browser's own [hidden] rule is display:none, but ANY author rule that sets
+     display (e.g. .chip{display:inline-flex}) outranks it, so el.hidden = true
+     silently does nothing. Several controls here are hidden that way, so make the
+     attribute authoritative once, rather than patching each selector. */
+  [hidden]{display:none !important}
   body{
     background:var(--desk);
     color:var(--ink);
