@@ -83,6 +83,8 @@
   [data-tier="loved"]{--tier:var(--gold)}
   [data-tier="fine"]{--tier:var(--sage)}
   [data-tier="disliked"]{--tier:var(--brick)}
+  /* No tier yet, so no tier colour — a neutral edge until the reader decides. */
+  [data-tier="unfiled"]{--tier:var(--card-edge)}
 
   /* ---- Card ---- */
   .card{
@@ -109,7 +111,6 @@
   /* Imported books were placed by their star rating, not by the reader. The
      dashed outline says "provisional" without shouting. */
   .card .prov{
-    grid-column:1; justify-self:start; margin-top:7px;
     font-family:"Space Mono",monospace; font-size:10px;
     text-transform:uppercase; letter-spacing:1px; color:var(--ink-faint);
     border:1px dashed var(--card-edge); border-radius:2px; padding:2px 6px;
@@ -145,6 +146,37 @@
   }
   .card .note.is-expandable .note-more{display:block}
   .card .note-more:focus-visible{outline:2px solid var(--stamp); outline-offset:2px}
+  /* Holding area: deliberately quieter than a real drawer. */
+  .unfiled-drawer{opacity:.92}
+  .unfiled-note{
+    font-size:12px; color:var(--ink-faint); margin:2px 0 8px; font-style:italic;
+  }
+  .card.is-unfiled{border-style:dashed}
+  .stamp-unfiled{
+    display:flex; align-items:center; justify-content:center;
+    border:1px dashed var(--card-edge); border-radius:2px; padding:4px 8px;
+    font-family:"Space Mono",monospace; font-size:10px; text-transform:uppercase;
+    letter-spacing:1px; color:var(--ink-faint); background:none;
+  }
+  .stamp-unfiled .rank{color:var(--ink-faint)}
+  .cardact{
+    margin-top:10px; padding-top:9px; border-top:1px dashed var(--card-edge);
+    display:flex; align-items:center; justify-content:space-between;
+    gap:8px 10px; flex-wrap:wrap;   /* stacks instead of overflowing on a phone */
+  }
+  .filebtn{
+    font-family:"Space Mono",monospace; font-size:11px; font-weight:700;
+    text-transform:uppercase; letter-spacing:1px; cursor:pointer;
+    background:transparent; color:var(--stamp);
+    border:1px solid var(--stamp); border-radius:2px; padding:5px 10px;
+  }
+  .filebtn:hover{background:var(--card-2)}
+  .filebtn:focus-visible{outline:2px solid var(--stamp); outline-offset:2px}
+  .gr-opt{
+    display:flex; align-items:flex-start; gap:8px; margin:10px 0 2px;
+    font-size:14px; color:var(--ink); cursor:pointer; line-height:1.45;
+  }
+  .gr-opt input{margin-top:3px; flex:0 0 auto}
   /* call-number stamp */
   .stamp{
     grid-row:1/span 2; grid-column:2; align-self:start;
@@ -307,6 +339,20 @@
     text-transform:uppercase; letter-spacing:1px; cursor:pointer;
     background:transparent; color:var(--stamp); border:none;
     padding:0 0 0 8px; margin-left:8px; border-left:1px solid var(--card-edge);
+  }
+  /* Same idiom, dialled down: a secondary action that shouldn't pull the eye. */
+  .inline-act.quiet{color:var(--ink-faint); font-weight:400; letter-spacing:1.5px}
+  .inline-act.quiet:hover{color:var(--stamp)}
+  /* Standalone and centred, so it drops the divider it wears when it trails text. */
+  .step-back{display:flex; justify-content:center; margin-top:12px}
+  .step-back .inline-act{border-left:none; margin-left:0; padding:4px 10px; position:relative}
+  /* Thumb-sized hit area without thumb-sized looks: this invisible pad extends the
+     tappable region to ~44px tall and 120px wide while the text stays small and the
+     row keeps its height. It stops short of the choices above it. */
+  .step-back .inline-act::after{
+    content:""; position:absolute; top:50%; left:50%;
+    transform:translate(-50%,-50%);
+    height:44px; width:max(120px, 100%);
   }
   .inline-act:hover{text-decoration:underline}
   .inline-act:focus-visible{outline:2px solid var(--stamp); outline-offset:2px; border-radius:2px}
@@ -517,6 +563,7 @@
         <button type="button" class="chip genre-chip" id="genreChip" aria-haspopup="true" aria-expanded="false">Genre</button>
         <div class="genre-pop" id="genrePop" role="menu" aria-label="Filter by genre" hidden></div>
       </span>
+      <button type="button" class="chip needs-chip" id="needsChip" aria-pressed="false" hidden>Needs ranking</button>
     </div>
   </section>
 
@@ -564,13 +611,16 @@
   let flow = null; // active add-flow or detail state
   // Transient search/sort/filter view. Never saved to storage; resets on reload.
   // A function (not a shared object) so each reset gets its own fresh genres[] array.
-  function freshView(){ return { query:"", sort:"score", tier:"all", genres:[] }; }
+  function freshView(){ return { query:"", sort:"score", tier:"all", genres:[], needsRanking:false }; }
   let view = freshView();
   // Ids whose note the reader has expanded on the card face. Transient like `view`:
   // never written to storage, so notes are collapsed again after a reload.
   const expandedNotes = new Set();
 
-  function emptyStore(){ return { books:{}, rankings:{loved:[],fine:[],disliked:[]} }; }
+  // `unranked` is the holding area: books you've read but haven't judged yet. They
+  // are deliberately NOT a fourth tier — they have no score and no rank, because no
+  // opinion has been given. Filing one moves it out of here and into a real tier.
+  function emptyStore(){ return { books:{}, rankings:{loved:[],fine:[],disliked:[]}, unranked:[] }; }
   function isValidShape(s){ return s && s.books && s.rankings; }
 
   // Derive a sortable "YYYY-MM-DD" from an old display date like "Jul 2026".
@@ -603,6 +653,9 @@
   // run on already-migrated data), so it also self-heals partial records.
   function migrate(s){
     if(!isValidShape(s)) return s;
+    // Additive: an older store simply has nothing waiting to be filed. Absence is
+    // the correct default, so this needs no key bump.
+    if(!Array.isArray(s.unranked)) s.unranked = [];
     Object.keys(s.books).forEach(id=>{
       const b = s.books[id];
       if(!Array.isArray(b.genres)) b.genres = [];
@@ -663,7 +716,17 @@
   const controlsEl = document.getElementById("controls");
   const insightsBtn = document.getElementById("insightsBtn");
 
+  // Counts only FILED books, so ranks, scores, Insights and the genre filter all
+  // ignore the holding area automatically.
   function totalBooks(){ return TIERS.reduce((a,t)=>a+store.rankings[t].length,0); }
+  function unfiledAll(){ return (store.unranked||[]).filter(id=> store.books[id]); }
+  // Filed by a star rating rather than by the reader — still awaiting a real gut check.
+  function provisionalCount(){
+    let n = 0;
+    TIERS.forEach(t=> store.rankings[t].forEach(id=>{ if(store.books[id].provisional) n++; }));
+    return n;
+  }
+  function isUnfiled(id){ return (store.unranked||[]).indexOf(id) !== -1; }
   function esc(s){ return (s||"").replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c])); }
 
   // Rank/score are always derived from a book's real position in storage, by id —
@@ -714,6 +777,7 @@
       if(view.tier!=="all" && view.tier!==t) return;
       store.rankings[t].forEach(id=>{
         const b = store.books[id];
+        if(view.needsRanking && !b.provisional) return; // only what you haven't ranked yourself
         if(!matchesQuery(b, q)) return;
         if(!matchesGenre(b)) return;
         out.push(id);
@@ -832,6 +896,17 @@
       chip.classList.toggle("active", on);
       chip.setAttribute("aria-pressed", on ? "true" : "false");
     });
+    // "Needs ranking": everything imported that you haven't placed yourself — books
+    // put somewhere by their stars, plus anything still unfiled. Hides itself, and
+    // clears itself, once there's nothing left to rank.
+    const needs = provisionalCount() + unfiledAll().length;
+    const needsEl = document.getElementById("needsChip");
+    needsEl.hidden = needs === 0;
+    if(needsEl.hidden) view.needsRanking = false;
+    needsEl.textContent = needs ? "Needs ranking · " + needs : "Needs ranking";
+    needsEl.classList.toggle("active", !!view.needsRanking);
+    needsEl.setAttribute("aria-pressed", view.needsRanking ? "true" : "false");
+
     // genre filter: prune stale selections, show/hide the chip, reflect state in its badge
     const gf = genreFilterOptions();
     const valid = new Set(gf.list.map(o=>o.key));
@@ -845,9 +920,12 @@
 
   function render(highlightId){
     const total = totalBooks();
+    const waiting = unfiledAll();
     shelfEl.innerHTML = "";
 
-    if(total === 0){
+    // Only a genuinely empty catalog gets the empty state. Someone whose whole
+    // import was unrated has books waiting, so the drawers are not "empty".
+    if(total === 0 && waiting.length === 0){
       controlsEl.hidden = true;
       insightsBtn.hidden = true;
       countEl.textContent = "0 volumes";
@@ -861,26 +939,36 @@
     }
 
     controlsEl.hidden = false;
-    insightsBtn.hidden = false;
+    insightsBtn.hidden = (total === 0); // nothing ranked yet, so there's nothing to analyse
     insightsBtn.classList.toggle("promoted", total >= INSIGHTS_MIN); // fill it in once Insights is worth opening
     syncControls();
 
     const ids = visibleIds();
-    countEl.textContent = (ids.length!==total)
+    let label = (ids.length!==total)
       ? ids.length + " of " + total + (total===1?" volume":" volumes")
       : total + (total===1?" volume":" volumes");
+    if(waiting.length) label += " · " + waiting.length + " unfiled";
+    countEl.textContent = label;
 
-    if(ids.length === 0){
-      shelfEl.innerHTML =
-        '<div class="empty"><h2>No books match your filters.</h2>'+
+    const showUnfiled = unfiledToShow(waiting);
+
+    // Only say "nothing matches" when genuinely nothing will be drawn — otherwise
+    // that message would sit above a shelf full of visible books.
+    if(ids.length === 0 && showUnfiled.length === 0 && total > 0){
+      const box = document.createElement("div");
+      box.className = "empty";
+      box.innerHTML =
+        '<h2>No books match your filters.</h2>'+
         '<p>Nothing fits the current search and filters. Loosen them, or clear '+
         'everything to see all '+total+' books.</p>'+
-        '<button class="add-btn" id="clearFilters">Clear search &amp; filters</button></div>';
+        '<button class="add-btn" id="clearFilters">Clear search &amp; filters</button>';
+      shelfEl.appendChild(box);
       document.getElementById("clearFilters").onclick = resetView;
+      markExpandableNotes();
       return;
     }
 
-    if(view.sort === "score"){
+    if(ids.length && view.sort === "score"){
       TIERS.forEach(tier=>{
         const tierIds = ids.filter(id=> store.books[id].tier===tier);
         if(!tierIds.length) return;
@@ -892,39 +980,83 @@
         tierIds.forEach(id=> drawer.appendChild(cardEl(id, id===highlightId)));
         shelfEl.appendChild(drawer);
       });
-    } else {
+    } else if(ids.length){
       const list = document.createElement("section");
       list.className = "drawer flatlist";
       sortIds(ids).forEach(id=> list.appendChild(cardEl(id, id===highlightId)));
       shelfEl.appendChild(list);
     }
+    renderUnfiled(showUnfiled);
     markExpandableNotes();
   }
 
-  function cardEl(id, highlight){
+  // Which unfiled books the current view should show. Search still applies, but the
+  // tier and genre filters don't: those ask about a judgement these books lack.
+  // "Needs ranking" is precisely about them, so it always lets them through.
+  function unfiledToShow(waiting){
+    if(!waiting.length) return [];
+    if(!view.needsRanking && (view.tier !== "all" || (view.genres||[]).length)) return [];
+    const q = view.query.trim();
+    return waiting.filter(id=> matchesQuery(store.books[id], q));
+  }
+
+  // The holding area, drawn below the ranked drawers.
+  function renderUnfiled(shown){
+    if(!shown.length) return;
+    const sec = document.createElement("section");
+    sec.className = "drawer unfiled-drawer";
+    sec.innerHTML =
+      '<div class="drawer-label">Read, not yet filed <span class="n">'+shown.length+'</span></div>'+
+      '<p class="unfiled-note">No score and no rank until you decide where each one sits.</p>';
+    shown.forEach(id=> sec.appendChild(cardEl(id, false, true)));
+    shelfEl.appendChild(sec);
+  }
+
+  // Start the tier-pick-and-compare flow for an imported book — either one with no
+  // tier at all, or one placed by its star rating and awaiting a real gut check.
+  // Nothing is written until the flow finishes, so cancelling changes nothing.
+  function startFiling(id){
     const b = store.books[id];
-    const info = rankInfo(id);
-    const score = info.score.toFixed(1);
-    const gr = globalRank(id), tot = totalBooks();
+    flow = { mode:"add", step:"tier", reId:id, tier:null,
+             title:b.title, author:b.author, takeaway:b.takeaway };
+    renderFlow(); openModal();
+  }
+
+  function cardEl(id, highlight, unfiled){
+    const b = store.books[id];
     const c = document.createElement("div");
-    c.className = "card" + (highlight ? " just-filed" : "");
-    c.dataset.tier = info.tier; // sets the left-stripe color even outside a drawer
+    c.className = "card" + (highlight ? " just-filed" : "") + (unfiled ? " is-unfiled" : "");
     const metaBits = [b.author ? esc(b.author) : "Unknown author"];
     if(b.dateFinished) metaBits.push(b.dateFinished);
+
+    // An unfiled book has no tier, so it has no score and no rank to show — asking
+    // for either would be claiming a judgement the reader hasn't made.
+    let stampHtml, label;
+    if(unfiled){
+      c.dataset.tier = "unfiled";
+      label = b.title + (b.author ? " by " + b.author : "") + ", not yet filed";
+      stampHtml = '<div class="stamp stamp-unfiled"><span class="rank">unfiled</span></div>';
+    } else {
+      const info = rankInfo(id);
+      const score = info.score.toFixed(1);
+      const gr = globalRank(id), tot = totalBooks();
+      c.dataset.tier = info.tier; // sets the left-stripe color even outside a drawer
+      label = b.title + ", " + TIER_META[info.tier].label + ", call number " + score +
+              ", ranked " + gr + " of " + tot + " overall";
+      stampHtml = '<div class="stamp"><span class="num">'+score+'</span>'+
+                  '<span class="rank">#'+gr+' of '+tot+'</span></div>';
+    }
 
     // Top zone: the real keyboard control, carrying the card's whole announcement.
     const main = document.createElement("div");
     main.className = "card-main";
     main.tabIndex = 0;
     main.setAttribute("role","button");
-    main.setAttribute("aria-label", b.title + ", " + TIER_META[info.tier].label +
-      ", call number " + score + ", ranked " + gr + " of " + tot + " overall");
+    main.setAttribute("aria-label", label);
     main.innerHTML =
       '<h3 class="title">'+esc(b.title)+'</h3>'+
-      '<div class="stamp"><span class="num">'+score+'</span>'+
-        '<span class="rank">#'+gr+' of '+tot+'</span></div>'+
+      stampHtml+
       '<div class="meta">'+metaBits.join(" · ")+'</div>'+
-      (b.provisional ? '<div class="prov">not yet ranked by you</div>' : "")+
       (Array.isArray(b.genres)&&b.genres.length ? '<div class="gtags">'+b.genres.map(g=>'<span class="gtag">'+esc(g)+'</span>').join("")+'</div>' : "");
     main.onkeydown = (e)=>{ if(e.key==="Enter"||e.key===" "){ e.preventDefault(); openDetail(id); } };
     c.appendChild(main);
@@ -937,6 +1069,23 @@
       note.innerHTML = '<div class="note-text">“'+esc(b.takeaway)+'”</div>'+
                        '<button type="button" class="note-more" aria-expanded="false"></button>';
       c.appendChild(note);
+    }
+
+    // Both kinds of imported book need the reader to place them: one has no tier at
+    // all, the other was put somewhere by its star rating. One tap starts the same
+    // gut-check flow for either. Sibling of .card-main, never inside it — the same
+    // reason the note's more/less button sits outside.
+    if(unfiled || b.provisional){
+      const act = document.createElement("div");
+      act.className = "cardact";
+      // Status and its action share one row, so a provisional card stays close to
+      // the height of a ranked one.
+      act.innerHTML =
+        (b.provisional ? '<span class="prov">not yet ranked by you</span>' : '<span></span>')+
+        '<button type="button" class="filebtn">'+
+        (unfiled ? 'File this book' : 'Rank this book')+'</button>';
+      act.querySelector(".filebtn").onclick = (e)=>{ e.stopPropagation(); startFiling(id); };
+      c.appendChild(act);
     }
 
     // Clicking anywhere the note hasn't claimed opens the detail view, so the
@@ -1358,6 +1507,12 @@
   function renderTier(){
     const reranking = !!flow.reId;
     const currentTier = reranking ? store.books[flow.reId].tier : null;
+    // Three different situations, three different truths:
+    //  - no tier at all  -> being filed for the very first time
+    //  - provisional     -> a star rating put it here; the reader hasn't confirmed it
+    //  - neither         -> a genuine re-rank of a book they already placed
+    const filingFresh = reranking && !currentTier;
+    const confirming  = reranking && !!currentTier && !!store.books[flow.reId].provisional;
     let picks = "";
     TIERS.forEach(t=>{
       const m = TIER_META[t];
@@ -1366,14 +1521,18 @@
                '<small>'+m.sub+'</small></button>';
     });
     sheet.innerHTML =
-      '<h2 id="sheetTitle">'+(reranking
-          ? 'Re-file “'+esc(flow.title)+'”'
-          : 'How did “'+esc(flow.title)+'” land?')+'</h2>'+
-      '<p class="step-tag">'+(reranking
-          ? 'Pick a tier — keep it here or move it, then re-rank'
-          : 'Step 2 of 3 · gut check first, comparison after')+'</p>'+
+      '<h2 id="sheetTitle">'+(filingFresh || confirming || !reranking
+          ? 'How did “'+esc(flow.title)+'” land?'
+          : 'Re-file “'+esc(flow.title)+'”')+'</h2>'+
+      '<p class="step-tag">'+(filingFresh
+          ? 'Filing it for the first time · gut check first, comparison after'
+          : confirming
+            ? 'Its stars put it here — confirm the tier or change it, then rank it'
+            : reranking
+              ? 'Pick a tier — keep it here or move it, then re-rank'
+              : 'Step 2 of 3 · gut check first, comparison after')+'</p>'+
       '<div class="tiers">'+picks+'</div>'+
-      '<div class="row"><button class="btn ghost" id="t-back">Back</button></div>';
+      '<div class="step-back"><button type="button" class="inline-act quiet" id="t-back">← Back</button></div>';
     document.getElementById("t-back").onclick = ()=>{
       if(reranking){ openDetail(flow.reId); } else { flow.step="meta"; renderFlow(); }
     };
@@ -1390,7 +1549,17 @@
     flow.pool = store.rankings[flow.tier].filter(x => x !== flow.reId);
     if(flow.pool.length === 0){ finalize(0); return; }
     flow.lo = 0; flow.hi = flow.pool.length; flow.round = 0;
+    flow.history = [];   // one entry per answered comparison, so Back can undo a misclick
     flow.step = "compare";
+    renderFlow();
+  }
+
+  // Undo the last comparison. round is set one below the saved value because
+  // renderCompare increments it again as it draws.
+  function stepBackComparison(){
+    const prev = (flow.history || []).pop();
+    if(!prev) return;
+    flow.lo = prev.lo; flow.hi = prev.hi; flow.round = prev.round - 1;
     renderFlow();
   }
 
@@ -1401,11 +1570,16 @@
     flow.round++;
     const mid = Math.floor((flow.lo + flow.hi) / 2);
     const rival = store.books[arr[mid]];
-    const tag = flow.reId
+    // A book leaving the holding area is being filed for the first time, so it isn't
+    // being "re-ranked" — it has never had a rank.
+    const firstFiling = flow.reId &&
+      (!store.books[flow.reId].tier || !!store.books[flow.reId].provisional);
+    const tag = (flow.reId && !firstFiling)
       ? 'Re-ranking · comparison '+flow.round+' · '+TIER_META[flow.tier].label
-      : 'Step 3 of 3 · comparison '+flow.round+' · filed under '+TIER_META[flow.tier].label;
+      : 'Comparison '+flow.round+' · filed under '+TIER_META[flow.tier].label;
     const newSub = flow.author ? esc(flow.author)
-                 : (flow.reId ? "the book you're re-ranking" : "your new entry");
+                 : (flow.reId ? (firstFiling ? "the book you're filing" : "the book you're re-ranking")
+                              : "your new entry");
     sheet.innerHTML =
       '<h2 id="sheetTitle">Which did you enjoy more?</h2>'+
       '<p class="step-tag">'+tag+'</p>'+
@@ -1414,9 +1588,25 @@
           '<span class="pa">'+newSub+'</span></button>'+
         '<button class="pick" id="p-old"><span class="pt">'+esc(rival.title)+'</span>'+
           '<span class="pa">'+(rival.author?esc(rival.author):"already filed")+'</span></button>'+
-      '</div>';
-    document.getElementById("p-new").onclick = ()=>{ flow.hi = mid; renderFlow(); };       // new wins -> upper half
-    document.getElementById("p-old").onclick = ()=>{ flow.lo = mid + 1; renderFlow(); };    // rival wins -> lower half
+      '</div>'+
+      // Centred under the choices and kept deliberately small: this screen repeats
+      // dozens of times during an import, so the undo must not bulk it out.
+      '<div class="step-back"><button type="button" class="inline-act quiet" id="c-back">'+
+        '← Back</button></div>';
+    // Remember where this comparison started before narrowing, so Back can restore it.
+    const choose = (nextLo, nextHi)=>{
+      if(!Array.isArray(flow.history)) flow.history = [];
+      flow.history.push({ lo:flow.lo, hi:flow.hi, round:flow.round });
+      flow.lo = nextLo; flow.hi = nextHi;
+      renderFlow();
+    };
+    document.getElementById("p-new").onclick = ()=> choose(flow.lo, mid);       // new wins -> upper half
+    document.getElementById("p-old").onclick = ()=> choose(mid + 1, flow.hi);   // rival wins -> lower half
+    document.getElementById("c-back").onclick = ()=>{
+      // Step back through the comparisons, then out to the tier choice.
+      if((flow.history||[]).length) stepBackComparison();
+      else { flow.step = "tier"; renderFlow(); }
+    };
   }
 
   function finalize(index){
@@ -1426,7 +1616,10 @@
       // Pull it out of its old tier list, then re-file it in the chosen tier below.
       id = flow.reId;
       const old = store.books[id].tier;
-      store.rankings[old] = store.rankings[old].filter(x => x !== id);
+      // An unfiled book has no old tier to be pulled out of — it leaves the
+      // holding area instead.
+      if(old && store.rankings[old]) store.rankings[old] = store.rankings[old].filter(x => x !== id);
+      if(Array.isArray(store.unranked)) store.unranked = store.unranked.filter(x => x !== id);
       store.books[id].tier = flow.tier;
       delete store.books[id].provisional; // re-ranking is the reader claiming the position
     } else {
@@ -1482,8 +1675,9 @@
   function renderDetail(){
     const id = flow.id;
     const b = store.books[id];
-    const rank = globalRank(id);
-    const score = scoreOf(id).toFixed(1);
+    const unfiled = isUnfiled(id) || !b.tier;
+    const rank = unfiled ? 0 : globalRank(id);
+    const score = unfiled ? "" : scoreOf(id).toFixed(1);
     sheet.innerHTML =
       '<h2 id="sheetTitle" style="position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)">Book details</h2>'+
       '<div class="detail-head">'+
@@ -1497,11 +1691,16 @@
             '<input type="date" id="d-date" class="d-date-input" value="'+esc(b.finishedOn||"")+'" max="'+isoToday()+'">'+
           '</label>'+
         '</div>'+
-        '<div class="detail-stamp" data-tier="'+b.tier+'"><span class="num">'+score+'</span>'+
-          '<span class="rank">#'+rank+' of '+totalBooks()+'</span></div>'+
+        (unfiled
+          ? '<div class="detail-stamp stamp-unfiled" data-tier="unfiled"><span class="rank">unfiled</span></div>'
+          : '<div class="detail-stamp" data-tier="'+b.tier+'"><span class="num">'+score+'</span>'+
+            '<span class="rank">#'+rank+' of '+totalBooks()+'</span></div>')+
       '</div>'+
-      '<div class="filed">Filed under <b>'+TIER_META[b.tier].label+'</b>'+
-        ' <button type="button" class="inline-act" id="d-rerank">Re-rank</button></div>'+
+      (unfiled
+        ? '<div class="filed">Read, but <b>not yet filed</b>'+
+          ' <button type="button" class="inline-act" id="d-rerank">File this book</button></div>'
+        : '<div class="filed">Filed under <b>'+TIER_META[b.tier].label+'</b>'+
+          ' <button type="button" class="inline-act" id="d-rerank">Re-rank</button></div>')+
       '<label class="fld"><span>A line to remember it by</span>'+
         '<textarea id="d-take" rows="3" placeholder="add a thought or favorite quote">'+esc(b.takeaway||"")+'</textarea></label>'+
       '<div class="gsection"><span class="gsection-lab">Genres (up to '+MAX_GENRES+')</span><div id="genreBox"></div></div>'+
@@ -1540,7 +1739,8 @@
       const btn = document.getElementById("d-remove");
       if(btn.dataset.armed){
         const t = b.tier;
-        store.rankings[t] = store.rankings[t].filter(x=>x!==id);
+        if(t && store.rankings[t]) store.rankings[t] = store.rankings[t].filter(x=>x!==id);
+        if(Array.isArray(store.unranked)) store.unranked = store.unranked.filter(x=>x!==id);
         delete store.books[id];
         save(); closeModal(); render();
       }else{
@@ -1588,8 +1788,18 @@
           return { ok:false, reason:'The file is damaged: a ranked book ("'+id+'") has no matching entry in "books".' };
       }
     }
+    // "unranked" is optional: backups made before the holding area existed won't
+    // have it. If it's there it must be sound, so a damaged file can't slip through.
+    if(data.unranked !== undefined){
+      if(!Array.isArray(data.unranked))
+        return { ok:false, reason:'The "unranked" section should be a list of books waiting to be filed.' };
+      for(const id of data.unranked){
+        if(typeof id!=="string" || !data.books[id])
+          return { ok:false, reason:'The file is damaged: an unfiled book ("'+id+'") has no matching entry in "books".' };
+      }
+    }
     const count = TIERS.reduce((a,t)=>a+data.rankings[t].length,0);
-    return { ok:true, count };
+    return { ok:true, count, unfiled: Array.isArray(data.unranked) ? data.unranked.length : 0 };
   }
 
   const importInput = document.getElementById("importFile");
@@ -1742,11 +1952,21 @@
       if(!title) return;
       const author = (r["Author"]||"").trim();
       const tier = grTier(r["My Rating"]);
-      if(!tier){ plan.unrated.push(title); return; }   // read but never rated: no signal
       const key = bookKey(title, author);
       if(seen.has(key)){ plan.dupeInFile++; return; }
       seen.add(key);
       if(existing.has(key)){ plan.alreadyHere++; return; }
+      if(!tier){
+        // Read but never rated. Plenty of readers rate nothing at all, so these go
+        // to the holding area rather than being dropped or given a made-up tier.
+        plan.unrated.push({
+          title, author,
+          takeaway: grHtmlToText(r["My Review"]),
+          finishedOn: grDateToIso(r["Date Read"]),
+          addedOn: grDateToIso(r["Date Added"])
+        });
+        return;
+      }
       plan.add.push({
         title, author,
         takeaway: grHtmlToText(r["My Review"]),        // kept whole; notes have no limit
@@ -1770,8 +1990,23 @@
     });
   }
 
-  function applyGoodreadsImport(plan){
+  function applyGoodreadsImport(plan, includeUnrated){
     let n = 0;
+    if(includeUnrated && plan.unrated.length){
+      if(!Array.isArray(store.unranked)) store.unranked = [];
+      plan.unrated.forEach(entry=>{
+        const id = "u" + Date.now().toString(36) + (n++).toString(36) +
+                   Math.floor(Math.random()*1e4).toString(36);
+        store.books[id] = {
+          id, title:entry.title, author:entry.author, takeaway:entry.takeaway,
+          tier: null, genres: [],                 // no tier: no opinion given yet
+          finishedOn: entry.finishedOn,
+          dateFinished: displayFromIso(entry.finishedOn),
+          addedOn: entry.addedOn || isoToday()
+        };
+        store.unranked.push(id);
+      });
+    }
     TIERS.forEach(tier=>{
       orderForTier(plan.add.filter(x => x.tier === tier)).forEach(entry=>{
         const id = "g" + Date.now().toString(36) + (n++).toString(36) +
@@ -1796,7 +2031,6 @@
     const noDate = plan.add.filter(x => !x.finishedOn).length;
     const skips = [];
     if(plan.notRead)     skips.push(plan.notRead + " not marked read on Goodreads");
-    if(plan.unrated.length) skips.push(plan.unrated.length + " read but never rated");
     if(plan.alreadyHere) skips.push(plan.alreadyHere + " already in your stacks");
     if(plan.dupeInFile)  skips.push(plan.dupeInFile + " repeated in the file");
     return { byTier, noDate, skips };
@@ -1806,38 +2040,47 @@
     flow = null;
     const s = goodreadsSummary(plan);
     const n = plan.add.length;
-    if(!n){
+    const u = plan.unrated.length;
+    if(!n && !u){
       sheet.innerHTML =
         '<h2 id="sheetTitle">Nothing to import</h2>'+
         '<p class="step-tag">Nothing was changed</p>'+
         '<p class="modal-copy">This export has <b>'+plan.total+'</b> rows, but none of them '+
-          'are rated books marked <b>read</b> that aren\'t already in your stacks.</p>'+
+          'are books marked <b>read</b> that aren\'t already in your stacks.</p>'+
         '<div class="row"><button class="btn primary" id="gr-ok">OK</button></div>';
       document.getElementById("gr-ok").onclick = closeModal;
       openModal(); document.getElementById("gr-ok").focus();
       return;
     }
+    const headline = n
+      ? 'Import '+n+' book'+(n===1?'':'s')+' from Goodreads?'
+      : 'Import '+u+' unrated book'+(u===1?'':'s')+'?';
     sheet.innerHTML =
-      '<h2 id="sheetTitle">Import '+n+' book'+(n===1?'':'s')+' from Goodreads?</h2>'+
+      '<h2 id="sheetTitle">'+headline+'</h2>'+
       '<p class="step-tag">Nothing is written until you confirm</p>'+
       '<p class="modal-copy">Found <b>'+plan.total+'</b> rows in this export. '+
         'These are <b>added</b> to your catalog — nothing you already have is replaced.</p>'+
-      '<p class="modal-copy"><b>'+s.byTier("loved")+'</b> Loved it · '+
+      (n ? '<p class="modal-copy"><b>'+s.byTier("loved")+'</b> Loved it · '+
         '<b>'+s.byTier("fine")+'</b> It was fine · '+
-        '<b>'+s.byTier("disliked")+'</b> Didn\'t like it</p>'+
+        '<b>'+s.byTier("disliked")+'</b> Didn\'t like it</p>' : '')+
       (s.skips.length ? '<p class="modal-copy soft">Skipping '+esc(s.skips.join(" · "))+'.</p>' : '')+
-      (plan.unrated.length ? '<p class="modal-copy soft">Unrated, so worth logging yourself for a real gut check: '+
-        esc(plan.unrated.slice(0,3).join("; "))+(plan.unrated.length>3 ? ' and '+(plan.unrated.length-3)+' more' : '')+'.</p>' : '')+
-      '<p class="modal-copy soft">Imported books are placed by their star rating and marked '+
+      (u ? '<label class="gr-opt"><input type="checkbox" id="gr-unrated" checked> '+
+        'Also bring in <b>'+u+'</b> book'+(u===1?'':'s')+' you read but never rated'+
+        '</label>'+
+        '<p class="modal-copy soft">They go to a <b>Read, not yet filed</b> shelf with no score '+
+        'and no rank, waiting for you to place them.</p>' : '')+
+      (n ? '<p class="modal-copy soft">Rated books are placed by their stars and marked '+
         '<b>not yet ranked</b> until you re-rank them yourself.'+
-        (s.noDate ? ' '+s.noDate+' have no finish date on Goodreads, so they\'ll show no date rather than a made-up one.' : '')+'</p>'+
+        (s.noDate ? ' '+s.noDate+' have no finish date on Goodreads, so they\'ll show no date rather than a made-up one.' : '')+'</p>' : '')+
       '<div class="row">'+
         '<button class="btn ghost" id="gr-cancel">Cancel</button>'+
-        '<button class="btn primary" id="gr-confirm">Add '+n+' book'+(n===1?'':'s')+'</button>'+
+        '<button class="btn primary" id="gr-confirm">Add books</button>'+
       '</div>';
     document.getElementById("gr-cancel").onclick = closeModal;
     document.getElementById("gr-confirm").onclick = ()=>{
-      applyGoodreadsImport(plan); closeModal(); resetView(); render();
+      const box = document.getElementById("gr-unrated");
+      applyGoodreadsImport(plan, !!(box && box.checked));
+      closeModal(); resetView(); render();
     };
     openModal();
     document.getElementById("gr-cancel").focus();
@@ -1884,6 +2127,9 @@
     if(!chip) return;
     view.tier = (view.tier === chip.dataset.tier) ? "all" : chip.dataset.tier; // click again to clear
     render();
+  });
+  document.getElementById("needsChip").addEventListener("click", ()=>{
+    view.needsRanking = !view.needsRanking; render();
   });
   document.getElementById("genreChip").addEventListener("click", e=>{ e.stopPropagation(); toggleGenrePop(); });
   document.addEventListener("click", e=>{ if(!e.target.closest("#genreFilter")) closeGenrePop(); });

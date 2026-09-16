@@ -189,6 +189,56 @@ key, scoring formula, quality floor all present).
   - **Preview before any write**, and the import ADDS rather than replaces (unlike the JSON
     restore). Wrong file → header check with a message saying where to get the real export.
 
+- **Holding area for unrated books ("Read, not yet filed") — DONE (not yet committed).**
+  Found by the user thinking about a friend who rates nothing on Goodreads: as first built,
+  the import gave that reader ZERO books. Unrated-but-read books now import into a holding
+  area via an opt-in checkbox in the preview (**on by default**).
+  - **`store.unranked` = [ids]. Deliberately NOT a fourth tier** — PRD says three tiers, and a
+    tier carries a score band an unrated book has no honest claim to. These books have
+    `tier: null`, **no score and no rank**, because no judgement has been given.
+  - Additive, so **no key bump**: absence of `unranked` is the correct default for older data.
+  - `totalBooks()` already summed the RANKING arrays, so unfiled books are excluded from
+    ranks, scores, Insights and the genre filter automatically. Header shows them separately
+    ("107 volumes · 42 unfiled").
+  - **Empty-state fix:** a catalog with only unfiled books must NOT show "The drawers are
+    empty" — that was the friend's exact case. Insights hides while nothing is ranked.
+  - "File this book" runs the normal tier-pick + compare flow (`flow.reId` with a null current
+    tier). Copy branches on that: first-time filing never says "re-file" or "re-ranking",
+    because the book has never had a rank. `finalize()` and remove both guard for a null tier.
+  - The File button is a SIBLING of `.card-main`, never inside it — same no-nested-controls
+    rule as the note's more/less button.
+  - Export carries `unranked`; `validateImport` treats it as optional but validates it when
+    present, so old backups still load and damaged ones still fail loudly.
+  - **One tap to rank an imported book.** Both kinds of import carry an action button in a
+    `.cardact` row: unfiled → "File this book", provisional → "Rank this book". Both call
+    `startFiling()`, which opens the tier step directly — no detour through the detail view.
+    Tier-step copy branches three ways and must stay honest: no tier → "Filing it for the
+    first time"; provisional → "Its stars put it here — confirm the tier or change it"
+    (the star-derived tier is marked `· current`, so confirming is one tap); otherwise a real
+    re-rank. Ranking clears `provisional`, so the badge and button both disappear.
+
+- **Back button in the comparison flow — DONE (not yet committed).** A misclick during
+  placement was unrecoverable. `startPlacement()` now seeds `flow.history`, each answer pushes
+  `{lo, hi, round}` before narrowing, and Back pops it. **`round` is restored as `saved.round
+  - 1`** because `renderCompare()` increments it again as it draws — get this wrong and the
+  counter drifts. With no history left, Back returns to the tier step, so the whole flow is
+  reversible in one direction. Verified: Comparison 3 → 2 → 1 restores the exact same rival
+  each time. **Styling is deliberate — don't "fix" it into a normal button.** Both the tier
+  step and the comparison step use `.step-back` → `.inline-act.quiet`: an 11px faint-grey
+  text control centred under the content, because a full `.btn` row added ~60px to a screen
+  the reader sees dozens of times during an import. The tap target is widened to ~44x120px
+  by an invisible `::after` pad rather than padding, so phones get a thumb-sized hit area
+  while the row keeps its height; the pad stops short of the choices above it. **Known gap:** the FINAL answer resolves `lo >= hi` and commits immediately, so
+  it can't be undone — the fix there is re-ranking the book.
+- **"Needs ranking" filter chip — DONE (not yet committed).** Sits after the genre chip in
+  the toolbar. Isolates everything imported but not placed by the reader: provisional books
+  (star-placed) AND the unfiled holding area. `view.needsRanking` toggles it; `visibleIds()`
+  drops non-provisional books; `unfiledToShow()` always lets the holding area through when
+  it's on (the tier/genre filters otherwise hide it, since those books have neither). The
+  chip carries a count ("Needs ranking · 105"), hides itself when the count hits 0, and
+  clears the filter when it hides. The "no books match" box is suppressed when the holding
+  area will still render, so that message can never sit above a shelf full of books.
+
 ## Deferred (not yet built)
 Two ideas parked with agreed designs (the v2 title autocomplete has shipped; these haven't) —
 details in the auto-memory roadmap notes:
