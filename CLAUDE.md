@@ -263,20 +263,35 @@ details in the auto-memory roadmap notes:
   book-metadata API and messy-data handling; still deferred. See memory
   `roadmap-online-genre-autosuggest`.
 
-## Resume here (next session) — as of 2026-08-24
-**Shipped and deployed.** Everything is committed and pushed on `main` (local ↔
-`origin/main` in sync); nothing pending in code. Live at **https://the-stacks-one.vercel.app**;
-GitHub remote is `github.com/achenn8/the-stacks` (push to `main` → Vercel auto-redeploys).
-Repo tracks: `index.html`, `README.md`, `PRD-the-stacks.md`, `PRD-v2-online.md`, `CLAUDE.md`,
-`.gitignore`. `the-stacks-v1.html` (pure offline snapshot) is **gitignored** and stays local.
-The `v2-online` branch is already merged into main.
+## Resume here (next session) — as of 2026-09-15
+Live at **https://the-stacks-one.vercel.app**; remote `github.com/achenn8/the-stacks`
+(push to `main` → Vercel auto-redeploys; the first fetch after a deploy often serves cache —
+re-check with a `?v=` buster before believing a deploy failed).
 
-**Pending (user-owned, no code):** the user plans to **manually reword `README.md`** in a few
-days. If they edit it on GitHub's web UI, `git pull` before the next local push (web commit will
-be ahead of local).
+**Working tree clean. ONE unpushed commit: `cffd22e`** (Goodreads button opens a how-to panel).
+Everything else through the Goodreads import, holding area and bug fixes is live.
 
-**Next feature — agreed roadmap** (see memory `roadmap-v2-future`): (a) privacy-first analytics
-(events only, never book content — treat the analytics script as a documented online exception
-like the Open Library call), then (b) PWA to make it installable. An interview-stories artifact
-was also published (find/update it via the Artifact tool's list). No rush; start when the user
-flags it.
+**IN PROGRESS: magic-link accounts via Supabase.** Full context in memory
+`feature-plans-import-accounts`; plans artifact: https://claude.ai/artifact/5XYM6rSmtyQd482V8rkqYh
+- **Blocked on the user:** they were given SQL to run in the Supabase SQL editor (two tables —
+  `profiles` and `catalogs` — plus Row Level Security policies and an `updated_at` trigger) and
+  two Auth settings (Site URL + redirect URLs). They said they'd do it the next day. **Ask how
+  it went before writing any client code.**
+- Project: `https://qvwvenpcwumiaughkzgm.supabase.co`, publishable key
+  `sb_publishable_BZqwzcCkX1AP-VkRehszoQ_ZAQhj70f` (public by design — it belongs in index.html;
+  NEVER touch the `sb_secret_…` key, which bypasses RLS entirely).
+- Decisions already made: usernames **required** at sign-up (3–20 chars, letters/numbers/
+  underscore, case-insensitive unique, reserved list, changeable); accounts stay **optional** so
+  anonymous local mode is untouched; device remains source of truth; on a sign-in conflict, ask
+  and offer the **holding area** for the losing side's extra books rather than merging two
+  ranked orders.
+- Known constraints: magic link can't work from `file://` (accounts are deployed-site only);
+  Supabase's built-in email is rate-limited; **account deletion needs a server-side Edge
+  Function** — deleting books is easy, deleting the login is not.
+
+**Pending (user-owned, no code):** they still plan to **manually reword `README.md`**. If they
+edit it on GitHub's web UI, `git pull` before the next local push. The README privacy claim
+("never leaves your device") **must be rewritten when accounts ship**.
+
+**Later, after accounts:** privacy-first analytics (events only, never book content), then a
+PWA. See memory `roadmap-v2-future`.
