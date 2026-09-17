@@ -70,6 +70,17 @@
   .account-bar .alink:hover{color:var(--card)}
   .account-bar .alink:focus-visible{outline:2px solid var(--stamp); outline-offset:2px; border-radius:2px}
   .account-bar .acct-name{color:var(--card); font-weight:700}
+  .account-bar .acct-warn{color:#E0A58F}
+  /* Sync conflict dialog: the two options laid out as a pair, like the tier picks. */
+  .sync-sides{display:grid; grid-template-columns:1fr 1fr; gap:10px; margin:6px 0 14px}
+  .sync-side{
+    background:var(--card-2); border:1px solid var(--card-edge); border-radius:var(--radius);
+    padding:12px 14px;
+  }
+  .sync-side .lab{font-size:11px; text-transform:uppercase; letter-spacing:1px; color:var(--ink-faint); margin-bottom:4px}
+  .sync-side .n{font-family:"Bitter",serif; font-size:22px; color:var(--ink); line-height:1.1}
+  .sync-side .when{font-size:12px; color:var(--ink-soft); margin-top:4px}
+  @media (max-width:520px){ .sync-sides{grid-template-columns:1fr} }
   .ghost-top{
     font-family:"Space Mono",monospace; font-weight:700; font-size:14px;
     background:transparent; color:rgba(239,231,213,.85);
@@ -718,8 +729,12 @@
     return emptyStore();
   }
   function save(){
+    // When this device's catalog last changed. Sync compares it against the last
+    // time we synced to tell "you edited here" from "nothing happened here".
+    store.updatedAt = new Date().toISOString();
     try{ localStorage.setItem(KEY, JSON.stringify(store)); }
     catch(e){ /* storage may be blocked in a sandbox preview; runs fine as a saved file */ }
+    schedulePush(); // no-op unless signed in with a username — see the Accounts section
   }
 
   // ---- Scoring ----
@@ -2223,8 +2238,12 @@
       document.getElementById("pickNameBtn").onclick = openUsername;
       document.getElementById("signOutBtn").onclick = signOut;
     } else {
+      const status = account.sync === "saving" ? ' · saving…'
+                   : account.sync === "synced" ? ' · saved to your account'
+                   : account.sync === "error"  ? ' · <span class="acct-warn">couldn\'t reach your account — will retry</span>'
+                   : '';
       accountBar.innerHTML =
-        '<span class="acct-name">@'+esc(account.username)+'</span> · '+
+        '<span class="acct-name">@'+esc(account.username)+'</span>'+status+' · '+
         '<button type="button" class="alink" id="signOutBtn">Sign out</button>';
       document.getElementById("signOutBtn").onclick = signOut;
     }
@@ -2319,6 +2338,7 @@
       account.username = v;
       renderAccountBar();
       closeModal();
+      reconcileOnSignIn(); // the account is complete now, so bring the two sides together
     };
     document.getElementById("un-save").onclick = save;
     input.onkeydown = (e)=>{ if(e.key==="Enter"){ e.preventDefault(); save(); } };
@@ -2331,12 +2351,200 @@
     account.username = (!error && data) ? data.username : null;
     renderAccountBar();
     if(!account.username) openUsername();
+    else reconcileOnSignIn();
   }
 
   async function signOut(){
+    clearTimeout(pushTimer);
     if(sb) await sb.auth.signOut();
-    account.user = null; account.username = null;
+    account.user = null; account.username = null; account.sync = "";
+    // The books stay on this device — signing out never deletes anything. But forget
+    // which account they were synced with, so the next sign-in has to ask rather than
+    // silently uploading one person's shelf into another person's account.
+    saveSyncMark(null);
     renderAccountBar();
+  }
+
+  // ---- Sync ----------------------------------------------------------------
+  // The device is the source of truth; the account is a copy of it. Every save on a
+  // signed-in device pushes the whole catalog (the same shape Export produces), and
+  // signing in pulls it. The interesting part is the moment of sign-in, when both
+  // sides may have books — see reconcileOnSignIn().
+  //
+  // A small "sync mark" remembers, per device, which account we last synced with and
+  // where both sides stood at the time. That's what lets us tell "cloud moved on, this
+  // device didn't" (just download) from "both moved" (a real conflict — ask).
+  const SYNC_KEY = "the-stacks-sync";
+  function loadSyncMark(){ try{ return JSON.parse(localStorage.getItem(SYNC_KEY)) || null; }catch(e){ return null; } }
+  function saveSyncMark(m){ try{ if(m) localStorage.setItem(SYNC_KEY, JSON.stringify(m)); else localStorage.removeItem(SYNC_KEY); }catch(e){} }
+
+  let pushTimer = null;
+  let reconciling = false;   // don't push mid-decision
+  function schedulePush(){
+    if(!sb || !account.user || !account.username || reconciling) return;
+    clearTimeout(pushTimer);
+    pushTimer = setTimeout(pushCatalog, 1500); // batch a burst of edits into one write
+  }
+
+  function setSync(state){ account.sync = state; renderAccountBar(); }
+
+  async function pushCatalog(){
+    if(!sb || !account.user || !account.username) return;
+    setSync("saving");
+    const { data, error } = await sb.from("catalogs")
+      .upsert({ id: account.user.id, data: store }, { onConflict: "id" })
+      .select("updated_at").maybeSingle();
+    if(error){ setSync("error"); return; }
+    saveSyncMark({ userId: account.user.id, localAt: store.updatedAt || "", cloudAt: data ? data.updated_at : "" });
+    setSync("synced");
+  }
+
+  async function pullCatalog(){
+    const { data, error } = await sb.from("catalogs").select("data, updated_at").eq("id", account.user.id).maybeSingle();
+    if(error) return { error };
+    return { row: data || null };
+  }
+
+  function countStore(s){
+    const ranked = TIERS.reduce((a,t)=> a + ((s.rankings && s.rankings[t]) || []).length, 0);
+    return ranked + ((s.unranked || []).filter(id => s.books && s.books[id]).length);
+  }
+  // Same books in the same order → nothing to reconcile, whatever the timestamps say.
+  function fingerprint(s){
+    const ids = Object.keys(s.books || {}).sort();
+    return JSON.stringify({ b: ids.map(id => s.books[id]), r: s.rankings, u: s.unranked || [] });
+  }
+  function deepClone(x){ return JSON.parse(JSON.stringify(x)); }
+
+  // Replace this device's catalog with another, redraw, and record the sync point.
+  function adoptStore(s, cloudAt){
+    reconciling = true;
+    store = migrate(deepClone(s));
+    try{ localStorage.setItem(KEY, JSON.stringify(store)); }catch(e){}
+    reconciling = false;
+    saveSyncMark({ userId: account.user.id, localAt: store.updatedAt || "", cloudAt: cloudAt || "" });
+    resetView(); // renders
+  }
+
+  // Keep one side's ranked order in full; any book from the other side that isn't
+  // already present lands in the holding area. Nothing is discarded, and no order is
+  // invented — the exact rule the holding area exists for.
+  function mergeLeftovers(winner, loser){
+    const out = migrate(deepClone(winner));
+    const have = new Set(Object.keys(out.books).map(id => bookKey(out.books[id].title, out.books[id].author)));
+    let n = 0, added = 0;
+    Object.keys(loser.books || {}).forEach(id=>{
+      const b = loser.books[id];
+      if(!b || have.has(bookKey(b.title, b.author))) return;
+      const nid = "m" + Date.now().toString(36) + (n++).toString(36) + Math.floor(Math.random()*1e4).toString(36);
+      const copy = deepClone(b);
+      copy.id = nid; copy.tier = null; delete copy.provisional;
+      out.books[nid] = copy;
+      out.unranked.push(nid);
+      have.add(bookKey(b.title, b.author));
+      added++;
+    });
+    return { store: out, added };
+  }
+
+  function whenLabel(iso){
+    if(!iso) return "unknown";
+    const d = new Date(iso), now = new Date();
+    const day = x => x.getFullYear()+"-"+x.getMonth()+"-"+x.getDate();
+    if(day(d) === day(now)) return "today";
+    const y = new Date(now); y.setDate(now.getDate()-1);
+    if(day(d) === day(y)) return "yesterday";
+    return d.getDate()+" "+MONTH_NAMES[d.getMonth()]+" "+d.getFullYear();
+  }
+
+  async function reconcileOnSignIn(){
+    if(!sb || !account.user || !account.username) return;
+    reconciling = true;
+    const res = await pullCatalog();
+    reconciling = false;
+    if(res.error){ setSync("error"); return; }
+    const row = res.row;
+    const cloudStore = (row && row.data && isValidShape(row.data)) ? migrate(deepClone(row.data)) : null;
+    const cloudCount = cloudStore ? countStore(cloudStore) : 0;
+    const localCount = countStore(store);
+    const mark = loadSyncMark();
+    const sameUser = !!(mark && mark.userId === account.user.id);
+
+    if(!localCount && !cloudCount){ saveSyncMark({ userId: account.user.id, localAt: store.updatedAt||"", cloudAt: row ? row.updated_at : "" }); setSync("synced"); return; }
+    if(!localCount && cloudCount){ adoptStore(cloudStore, row.updated_at); setSync("synced"); return; }
+    if(localCount && !cloudCount){
+      // Only upload silently when we KNOW these books belong to this account. On a
+      // shared device the last person's shelf must never quietly become yours.
+      if(sameUser){ pushCatalog(); return; }
+      openFirstSyncPrompt(localCount);
+      return;
+    }
+    // Both sides have books.
+    if(fingerprint(cloudStore) === fingerprint(store)){
+      saveSyncMark({ userId: account.user.id, localAt: store.updatedAt||"", cloudAt: row.updated_at });
+      setSync("synced"); return;
+    }
+    const localChanged = !sameUser || (store.updatedAt || "") > (mark.localAt || "");
+    const cloudChanged = !sameUser || row.updated_at !== mark.cloudAt;
+    if(sameUser && !localChanged){ adoptStore(cloudStore, row.updated_at); setSync("synced"); return; }
+    if(sameUser && !cloudChanged){ pushCatalog(); return; }
+    openSyncConflict(cloudStore, row.updated_at, localCount, cloudCount);
+  }
+
+  // First sign-in on a device that already has books, with an empty account.
+  function openFirstSyncPrompt(localCount){
+    flow = null;
+    sheet.innerHTML =
+      '<h2 id="sheetTitle">Add these books to your account?</h2>'+
+      '<p class="step-tag">Your account is empty; this device isn\'t</p>'+
+      '<p class="modal-copy">This device has <b>'+localCount+'</b> '+(localCount===1?'book':'books')+'. '+
+        'Add them to <b>@'+esc(account.username)+'</b> so they follow you to other devices?</p>'+
+      '<p class="modal-copy soft">Not yours? If someone else used this device, choose “Not mine” '+
+        'and they\'ll be removed from here so you start fresh. If they might be that person\'s '+
+        'only copy, cancel and export a backup first.</p>'+
+      '<div class="row">'+
+        '<button class="btn ghost" id="fs-skip">Not mine</button>'+
+        '<button class="btn primary" id="fs-add">Add them</button>'+
+      '</div>';
+    document.getElementById("fs-add").onclick = ()=>{ closeModal(); pushCatalog(); };
+    // Destructive, so it takes two taps — the same "Really remove?" pattern as the card.
+    document.getElementById("fs-skip").onclick = ()=>{
+      const btn = document.getElementById("fs-skip");
+      if(!btn.dataset.armed){ btn.dataset.armed = "1"; btn.textContent = "Really remove "+localCount+" from this device?"; return; }
+      closeModal(); adoptStore(emptyStore(), ""); pushCatalog();
+    };
+    openModal(); document.getElementById("fs-add").focus();
+  }
+
+  function openSyncConflict(cloudStore, cloudAt, localCount, cloudCount){
+    flow = null;
+    sheet.innerHTML =
+      '<h2 id="sheetTitle">Your books are in two places</h2>'+
+      '<p class="step-tag">This device and your account have both changed</p>'+
+      '<div class="sync-sides">'+
+        '<div class="sync-side"><div class="lab">This device</div>'+
+          '<div class="n">'+localCount+' '+(localCount===1?'book':'books')+'</div>'+
+          '<div class="when">last changed '+esc(whenLabel(store.updatedAt))+'</div></div>'+
+        '<div class="sync-side"><div class="lab">Your account</div>'+
+          '<div class="n">'+cloudCount+' '+(cloudCount===1?'book':'books')+'</div>'+
+          '<div class="when">last changed '+esc(whenLabel(cloudAt))+'</div></div>'+
+      '</div>'+
+      '<p class="modal-copy">Which <b>order</b> do you want to keep? Nothing is thrown away: any book '+
+        'from the other side that isn\'t already in the one you keep goes to '+
+        '<b>Read, not yet filed</b>, waiting for you to place it.</p>'+
+      '<div class="row">'+
+        '<button class="btn ghost" id="sc-device">Keep this device\'s</button>'+
+        '<button class="btn primary" id="sc-cloud">Keep my account\'s</button>'+
+      '</div>';
+    document.getElementById("sc-cloud").onclick = ()=>{
+      const m = mergeLeftovers(cloudStore, store);
+      closeModal(); adoptStore(m.store, cloudAt); pushCatalog();
+    };
+    document.getElementById("sc-device").onclick = ()=>{
+      const m = mergeLeftovers(store, cloudStore);
+      closeModal(); adoptStore(m.store, cloudAt); pushCatalog();
+    };
+    openModal(); document.getElementById("sc-cloud").focus();
   }
 
   async function initAccount(){

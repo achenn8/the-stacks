@@ -291,8 +291,24 @@ Everything else through the Goodreads import, holding area and bug fixes is live
   **Nothing syncs yet.** Verified locally at an http origin: bar shows, modal validates, no
   console errors; verified the bar stays hidden on file://. **The email → redirect → session
   → username → sign-out loop can only be tested by the user on the live site** — ask how it
-  went. Increment 2 is sync + the conflict dialog; increment 3 is change-username / delete
-  books / delete account (needs an Edge Function) / README privacy rewrite.
+  went.
+- **Increment 2 (sync) is BUILT (2026-09-16), awaiting the user's live test.** Device stays
+  source of truth. `save()` stamps `store.updatedAt` and debounces a push (1.5s) when signed in
+  with a username; `pushCatalog()` upserts the whole store into `catalogs.data` (same shape as
+  Export). A per-device **sync mark** (`localStorage["the-stacks-sync"]` = `{userId, localAt,
+  cloudAt}`) is written after every successful push/adopt and cleared on sign-out.
+  `reconcileOnSignIn()` decision table: nothing/nothing → mark; local-only → push if the mark
+  says same user, else **ask** ("Add these N books to your account?" — never silently upload
+  a stranger's shelf on a shared device; "Not mine" is a two-tap destructive path); cloud-only
+  → adopt; both → if fingerprints equal, mark; else if same user and local untouched since
+  last sync → adopt cloud; else if same user and cloud untouched → push; else **conflict
+  dialog** showing counts + "last changed" per side, and whichever order you keep, the other
+  side's non-duplicate books go to the holding area via `mergeLeftovers()` (dedupe on
+  `bookKey`, new ids, `tier:null`). `mergeLeftovers`/`fingerprint`/`countStore`/`whenLabel`
+  were verified by extracting the real function source and running it standalone. Account bar
+  shows saving… / saved to your account / couldn't reach — will retry.
+  Increment 3 is change-username / delete books / delete account (needs an Edge Function) /
+  README privacy rewrite.
 - Project: `https://qvwvenpcwumiaughkzgm.supabase.co`, publishable key
   `sb_publishable_BZqwzcCkX1AP-VkRehszoQ_ZAQhj70f` (public by design — it belongs in index.html;
   NEVER touch the `sb_secret_…` key, which bypasses RLS entirely).
