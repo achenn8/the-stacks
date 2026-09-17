@@ -61,6 +61,15 @@
   .add-btn:hover{transform:translateY(-1px); box-shadow:0 3px 0 var(--desk-edge)}
   .add-btn:active{transform:translateY(1px); box-shadow:0 1px 0 var(--desk-edge)}
   .top-actions{display:flex; flex-wrap:wrap; gap:10px; justify-content:flex-end; margin-top:12px}
+  /* Account line under the header buttons: quiet, text-only, never competes with Log/Insights. */
+  .account-bar{margin-top:10px; font-size:12px; color:rgba(239,231,213,.55); letter-spacing:.3px}
+  .account-bar .alink{
+    background:none; border:none; padding:0; cursor:pointer; font-family:inherit; font-size:12px;
+    color:rgba(239,231,213,.85); text-decoration:underline; text-underline-offset:3px;
+  }
+  .account-bar .alink:hover{color:var(--card)}
+  .account-bar .alink:focus-visible{outline:2px solid var(--stamp); outline-offset:2px; border-radius:2px}
+  .account-bar .acct-name{color:var(--card); font-weight:700}
   .ghost-top{
     font-family:"Space Mono",monospace; font-weight:700; font-size:14px;
     background:transparent; color:rgba(239,231,213,.85);
@@ -553,6 +562,9 @@
         <button class="add-btn" id="addBtn">＋ Log a finished book</button>
         <button class="ghost-top" id="insightsBtn">Insights</button>
       </div>
+      <!-- Only appears when the account library loaded and we're on a real web address.
+           Opened as a local file, or offline, this stays hidden and nothing changes. -->
+      <div class="account-bar" id="accountBar" hidden></div>
     </div>
   </header>
 
@@ -596,6 +608,9 @@
     <div class="sheet" id="sheet"></div>
   </div>
 
+<!-- Accounts: the Supabase client, pinned. A documented online exception like the fonts
+     and the title lookup. Everything that uses it checks it actually loaded first. -->
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.116.0/dist/umd/supabase.min.js" crossorigin="anonymous"></script>
 <script>
 (function(){
   "use strict";
@@ -2162,6 +2177,179 @@
     openModal(); document.getElementById("gre-ok").focus();
   }
 
+  // ---- Accounts (magic link, via Supabase) ---------------------------------
+  // A layer on top of the local-first app, never a requirement. If the client library
+  // didn't load (offline) or we're not on a real web address (a magic link has nowhere
+  // to redirect to from a local file), none of this appears and the app is exactly
+  // what it was. The publishable key is public by design: it grants almost nothing on
+  // its own — Row Level Security in the database is what keeps each person's books
+  // to themselves.
+  const SB_URL = "https://qvwvenpcwumiaughkzgm.supabase.co";
+  const SB_KEY = "sb_publishable_BZqwzcCkX1AP-VkRehszoQ_ZAQhj70f";
+  const sb = (window.supabase && /^https?:$/.test(location.protocol))
+    ? window.supabase.createClient(SB_URL, SB_KEY)
+    : null;
+  const account = { user:null, username:null };
+  const accountBar = document.getElementById("accountBar");
+
+  // Mirrors the database rules so most mistakes are caught before a round trip; the
+  // database still has the final say (and enforces uniqueness, which only it can).
+  const USERNAME_RE = /^[A-Za-z0-9_]{3,20}$/;
+  const RESERVED_NAMES = new Set(["admin","administrator","moderator","mod","staff","support",
+    "help","root","system","thestacks","stacks","about","settings","login","signin","signup",
+    "api","null","undefined"]);
+  function usernameProblem(v){
+    if(!USERNAME_RE.test(v)) return "3 to 20 characters — letters, numbers and underscores only.";
+    if(RESERVED_NAMES.has(v.toLowerCase())) return "That name is reserved — pick another.";
+    return "";
+  }
+
+  function renderAccountBar(){
+    if(!sb){ accountBar.hidden = true; return; }
+    accountBar.hidden = false;
+    if(!account.user){
+      accountBar.innerHTML =
+        '<button type="button" class="alink" id="signInBtn">Sign in</button>'+
+        ' to keep your stacks across devices';
+      document.getElementById("signInBtn").onclick = openSignIn;
+    } else if(!account.username){
+      // Signed in but the required username was never set (they closed the prompt).
+      accountBar.innerHTML =
+        '<button type="button" class="alink" id="pickNameBtn">Pick a username</button>'+
+        ' to finish signing in · <button type="button" class="alink" id="signOutBtn">Sign out</button>';
+      document.getElementById("pickNameBtn").onclick = openUsername;
+      document.getElementById("signOutBtn").onclick = signOut;
+    } else {
+      accountBar.innerHTML =
+        '<span class="acct-name">@'+esc(account.username)+'</span> · '+
+        '<button type="button" class="alink" id="signOutBtn">Sign out</button>';
+      document.getElementById("signOutBtn").onclick = signOut;
+    }
+  }
+
+  function friendlyAuthError(err){
+    const m = ((err && err.message) || "").toLowerCase();
+    if(m.includes("rate") || m.includes("limit")) return "Too many attempts for now — give it a few minutes and try again.";
+    return "Couldn't send the link. Check the address and try again.";
+  }
+
+  function openSignIn(){
+    flow = null;
+    sheet.innerHTML =
+      '<h2 id="sheetTitle">Sign in</h2>'+
+      '<p class="step-tag">No password — we email you a link</p>'+
+      '<label class="fld"><span>Email</span>'+
+        '<input id="si-email" type="email" autocomplete="email" inputmode="email" placeholder="you@example.com"></label>'+
+      '<p class="modal-copy soft" id="si-msg">Click the link on this device and you\'re in.</p>'+
+      '<div class="row">'+
+        '<button class="btn ghost" id="si-cancel">Cancel</button>'+
+        '<button class="btn primary" id="si-send">Email me a link</button>'+
+      '</div>';
+    const email = document.getElementById("si-email");
+    const msg = document.getElementById("si-msg");
+    document.getElementById("si-cancel").onclick = closeModal;
+    const send = async ()=>{
+      const v = email.value.trim();
+      if(!v || !v.includes("@")){ email.focus(); msg.textContent = "That doesn't look like an email address."; return; }
+      const btn = document.getElementById("si-send");
+      btn.disabled = true; btn.textContent = "Sending…";
+      const { error } = await sb.auth.signInWithOtp({
+        email: v,
+        options: { emailRedirectTo: location.origin + location.pathname }
+      });
+      if(error){
+        btn.disabled = false; btn.textContent = "Email me a link";
+        msg.textContent = friendlyAuthError(error);
+        return;
+      }
+      sheet.innerHTML =
+        '<h2 id="sheetTitle">Check your email</h2>'+
+        '<p class="step-tag">A sign-in link is on its way</p>'+
+        '<p class="modal-copy">We sent a link to <b>'+esc(v)+'</b>. Open it on this device '+
+          'and you\'ll be signed in — nothing else to type.</p>'+
+        '<p class="modal-copy soft">Nothing arrived? Check spam, or wait a minute and try again.</p>'+
+        '<div class="row"><button class="btn primary" id="si-ok">OK</button></div>';
+      document.getElementById("si-ok").onclick = closeModal;
+      document.getElementById("si-ok").focus();
+    };
+    document.getElementById("si-send").onclick = send;
+    email.onkeydown = (e)=>{ if(e.key==="Enter"){ e.preventDefault(); send(); } };
+    openModal(); email.focus();
+  }
+
+  // Usernames are required, so the only way out of this is a name or signing out.
+  function openUsername(){
+    flow = null;
+    sheet.innerHTML =
+      '<h2 id="sheetTitle">Pick a username</h2>'+
+      '<p class="step-tag">One more thing, then you\'re in</p>'+
+      '<label class="fld"><span>Username</span>'+
+        '<input id="un-input" autocomplete="username" autocapitalize="off" spellcheck="false" '+
+          'maxlength="20" placeholder="3–20 letters, numbers or _"></label>'+
+      '<p class="modal-copy soft" id="un-msg">Letters, numbers and underscores. You can change it later.</p>'+
+      '<div class="row">'+
+        '<button class="btn ghost" id="un-out">Sign out</button>'+
+        '<button class="btn primary" id="un-save">Save</button>'+
+      '</div>';
+    const input = document.getElementById("un-input");
+    const msg = document.getElementById("un-msg");
+    document.getElementById("un-out").onclick = ()=>{ closeModal(); signOut(); };
+    const save = async ()=>{
+      const v = input.value.trim();
+      const problem = usernameProblem(v);
+      if(problem){ msg.textContent = problem; input.focus(); return; }
+      const btn = document.getElementById("un-save");
+      btn.disabled = true; btn.textContent = "Saving…";
+      const { error } = await sb.from("profiles").insert({ id: account.user.id, username: v });
+      if(error){
+        btn.disabled = false; btn.textContent = "Save";
+        // 23505 = already taken (unique index); 23514 = the database's own format/reserved check.
+        msg.textContent = error.code === "23505" ? "That one's taken — try another."
+                        : error.code === "23514" ? "That name isn't allowed — try another."
+                        : "Couldn't save that. Try again.";
+        input.focus();
+        return;
+      }
+      account.username = v;
+      renderAccountBar();
+      closeModal();
+    };
+    document.getElementById("un-save").onclick = save;
+    input.onkeydown = (e)=>{ if(e.key==="Enter"){ e.preventDefault(); save(); } };
+    openModal(); input.focus();
+  }
+
+  async function loadProfile(){
+    if(!account.user) return;
+    const { data, error } = await sb.from("profiles").select("username").eq("id", account.user.id).maybeSingle();
+    account.username = (!error && data) ? data.username : null;
+    renderAccountBar();
+    if(!account.username) openUsername();
+  }
+
+  async function signOut(){
+    if(sb) await sb.auth.signOut();
+    account.user = null; account.username = null;
+    renderAccountBar();
+  }
+
+  async function initAccount(){
+    renderAccountBar();
+    if(!sb) return;
+    const { data } = await sb.auth.getSession();
+    account.user = (data && data.session) ? data.session.user : null;
+    renderAccountBar();
+    if(account.user) loadProfile();
+    sb.auth.onAuthStateChange((event, session)=>{
+      const before = account.user && account.user.id;
+      account.user = session ? session.user : null;
+      if(!account.user){ account.username = null; renderAccountBar(); return; }
+      // The magic link lands with its tokens in the address bar; tidy them away once used.
+      if(event === "SIGNED_IN" && location.hash) history.replaceState(null, "", location.pathname + location.search);
+      if(account.user.id !== before) loadProfile(); else renderAccountBar();
+    });
+  }
+
   // ---- Findability controls wiring ----
   document.getElementById("q").addEventListener("input", e=>{ view.query = e.target.value; render(); });
   document.getElementById("sortSel").addEventListener("change", e=>{ view.sort = e.target.value; render(); });
@@ -2179,6 +2367,7 @@
   document.addEventListener("keydown", e=>{ if(e.key==="Escape") closeGenrePop(); });
 
   render();
+  initAccount();
 })();
 </script>
 </body>

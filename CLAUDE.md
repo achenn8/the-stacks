@@ -35,6 +35,13 @@ Full requirements are in `PRD-the-stacks.md`; the online addendum is in `PRD-v2-
   app still works fully offline (typing by hand), and only the typed title is ever sent
   out (never the reading list, scores, or notes). No OTHER network calls or external deps
   may be added without being asked. A pure-offline snapshot lives in `the-stacks-v1.html`.
+- **Second online exception (accounts, approved 2026-09-16):** the Supabase client library
+  is loaded from jsDelivr, pinned to an exact version. Everything account-related is gated
+  on `sb` being non-null, which requires BOTH the library having loaded AND an `http(s):`
+  origin — so opened as a local file, or offline, the account bar simply doesn't appear and
+  the app is exactly what it was. Accounts are a layer on top, never a requirement. The
+  publishable key in the file is public by design (RLS does the protecting); the
+  `sb_secret_…` key must never appear anywhere in this repo.
 - Preserve the data model, scoring formula, and placement algorithm documented in the
   PRD (Sections 4.3–4.5). If a change adds fields, migrate existing data; never wipe it.
 - localStorage key is `"the-stacks-v3"` (localStorage = a small storage area in the browser
@@ -273,10 +280,19 @@ Everything else through the Goodreads import, holding area and bug fixes is live
 
 **IN PROGRESS: magic-link accounts via Supabase.** Full context in memory
 `feature-plans-import-accounts`; plans artifact: https://claude.ai/artifact/5XYM6rSmtyQd482V8rkqYh
-- **Blocked on the user:** they were given SQL to run in the Supabase SQL editor (two tables —
-  `profiles` and `catalogs` — plus Row Level Security policies and an `updated_at` trigger) and
-  two Auth settings (Site URL + redirect URLs). They said they'd do it the next day. **Ask how
-  it went before writing any client code.**
+- **Backend is set up** (2026-09-16): the SQL ran ("Success. No rows returned") creating
+  `profiles` + `catalogs` with RLS and an `updated_at` trigger; Site URL and redirect URLs are
+  configured.
+- **Increment 1 (sign in / username / sign out) is BUILT.** Header account bar; email →
+  `signInWithOtp` → "Check your email"; on landing, `onAuthStateChange` loads the profile and
+  demands a username if missing (required — the only other exit is Sign out); client-side
+  validation mirrors the DB rules, DB errors 23505 (taken) / 23514 (format or reserved) map to
+  friendly messages; the magic link's tokens are scrubbed from the address bar after use.
+  **Nothing syncs yet.** Verified locally at an http origin: bar shows, modal validates, no
+  console errors; verified the bar stays hidden on file://. **The email → redirect → session
+  → username → sign-out loop can only be tested by the user on the live site** — ask how it
+  went. Increment 2 is sync + the conflict dialog; increment 3 is change-username / delete
+  books / delete account (needs an Edge Function) / README privacy rewrite.
 - Project: `https://qvwvenpcwumiaughkzgm.supabase.co`, publishable key
   `sb_publishable_BZqwzcCkX1AP-VkRehszoQ_ZAQhj70f` (public by design — it belongs in index.html;
   NEVER touch the `sb_secret_…` key, which bypasses RLS entirely).
