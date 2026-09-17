@@ -2191,6 +2191,9 @@
     : null;
   const account = { user:null, username:null };
   const accountBar = document.getElementById("accountBar");
+  // Who the sign-in email appears to come from. Supabase's built-in sender until a real
+  // email service is connected; then change this one string to match the new sender.
+  const SIGNIN_SENDER = "Supabase";
 
   // Mirrors the database rules so most mistakes are caught before a round trip; the
   // database still has the final say (and enforces uniqueness, which only it can).
@@ -2229,7 +2232,8 @@
 
   function friendlyAuthError(err){
     const m = ((err && err.message) || "").toLowerCase();
-    if(m.includes("rate") || m.includes("limit")) return "Too many attempts for now — give it a few minutes and try again.";
+    // Could be the 60-second per-address cooldown or the hourly cap; don't promise "minutes".
+    if(m.includes("rate") || m.includes("limit")) return "Too many sign-in emails for now — wait a while and try again.";
     return "Couldn't send the link. Check the address and try again.";
   }
 
@@ -2265,9 +2269,11 @@
       sheet.innerHTML =
         '<h2 id="sheetTitle">Check your email</h2>'+
         '<p class="step-tag">A sign-in link is on its way</p>'+
-        '<p class="modal-copy">We sent a link to <b>'+esc(v)+'</b>. Open it on this device '+
-          'and you\'ll be signed in — nothing else to type.</p>'+
-        '<p class="modal-copy soft">Nothing arrived? Check spam, or wait a minute and try again.</p>'+
+        '<p class="modal-copy">We sent a link to <b>'+esc(v)+'</b>. It comes from '+
+          '<b>'+esc(SIGNIN_SENDER)+'</b>, the service that handles sign-in for The Stacks — '+
+          'open it on this device and you\'ll be signed in, nothing else to type.</p>'+
+        '<p class="modal-copy soft">Nothing arrived? Check spam for an email from '+esc(SIGNIN_SENDER)+
+          ', or wait a minute and try again.</p>'+
         '<div class="row"><button class="btn primary" id="si-ok">OK</button></div>';
       document.getElementById("si-ok").onclick = closeModal;
       document.getElementById("si-ok").focus();

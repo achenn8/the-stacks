@@ -302,8 +302,18 @@ Everything else through the Goodreads import, holding area and bug fixes is live
   and offer the **holding area** for the losing side's extra books rather than merging two
   ranked orders.
 - Known constraints: magic link can't work from `file://` (accounts are deployed-site only);
-  Supabase's built-in email is rate-limited; **account deletion needs a server-side Edge
-  Function** — deleting books is easy, deleting the login is not.
+  **account deletion needs a server-side Edge Function** — deleting books is easy, deleting
+  the login is not.
+- **LAUNCH BLOCKER — custom SMTP.** Supabase's built-in email sends **2 messages/hour** and
+  **only to the project's team members**. The user hit the cap testing; more importantly,
+  **no friend can sign in at all** until a real email service is connected. That needs a
+  **domain the user owns** (~$10–15/yr; providers won't send as Gmail or from vercel.app).
+  Resend has a free tier and a Supabase integration. When it's set up: change
+  `SIGNIN_SENDER` in index.html to the new sender name, and customise the Magic Link
+  template (Authentication → Email Templates) so the email says "The Stacks".
+- **Increment 1 verified by the user on the live site (2026-09-16):** sign-in, username
+  (3–20 rule enforced), sign-out, sign back in — all worked. Reading history did NOT carry
+  to a second browser, which is correct: sync is increment 2 and not built yet.
 
 **Pending (user-owned, no code):** they still plan to **manually reword `README.md`**. If they
 edit it on GitHub's web UI, `git pull` before the next local push. The README privacy claim
