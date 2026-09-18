@@ -307,6 +307,15 @@ Everything else through the Goodreads import, holding area and bug fixes is live
   `bookKey`, new ids, `tier:null`). `mergeLeftovers`/`fingerprint`/`countStore`/`whenLabel`
   were verified by extracting the real function source and running it standalone. Account bar
   shows saving… / saved to your account / couldn't reach — will retry.
+  **Pushes are conditional (fixed 2026-09-18 after the user's test).** The first version
+  upserted blindly, so the last device to push silently won and the conflict was erased
+  before sign-in could detect it. Now `pushCatalog()` does `update … .eq("updated_at",
+  mark.cloudAt)`: if another device pushed since this one last synced, zero rows match,
+  nothing is written, and `reconcileOnSignIn()` runs — so the **conflict dialog appears on
+  the second device to push, at the moment it tries to save**, not on a later refresh. The
+  plain upsert is only used when this device has never synced (no mark). **Known limit:**
+  `mergeLeftovers` rescues whole books, not competing edits to the same book — for a book on
+  both sides, the kept side's version wins; the dialog copy says so.
   Increment 3 is change-username / delete books / delete account (needs an Edge Function) /
   README privacy rewrite.
 - Project: `https://qvwvenpcwumiaughkzgm.supabase.co`, publishable key

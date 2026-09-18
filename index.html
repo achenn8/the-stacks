@@ -2391,11 +2391,27 @@
   async function pushCatalog(){
     if(!sb || !account.user || !account.username) return;
     setSync("saving");
-    const { data, error } = await sb.from("catalogs")
-      .upsert({ id: account.user.id, data: store }, { onConflict: "id" })
-      .select("updated_at").maybeSingle();
-    if(error){ setSync("error"); return; }
-    saveSyncMark({ userId: account.user.id, localAt: store.updatedAt || "", cloudAt: data ? data.updated_at : "" });
+    const mark = loadSyncMark();
+    const known = (mark && mark.userId === account.user.id) ? (mark.cloudAt || "") : "";
+    let res;
+    if(known){
+      // Only overwrite if the cloud is still exactly what this device last saw. If
+      // another device has pushed since, this writes NOTHING — and we reconcile
+      // instead, which is where the conflict dialog lives. Without this guard the
+      // last device to push silently won, and the conflict was erased before anyone
+      // could be asked about it.
+      res = await sb.from("catalogs").update({ data: store })
+        .eq("id", account.user.id).eq("updated_at", known)
+        .select("updated_at").maybeSingle();
+      if(!res.error && !res.data){ reconcileOnSignIn(); return; }   // 0 rows matched
+    } else {
+      // Never synced from this device: create the row, or take it over.
+      res = await sb.from("catalogs")
+        .upsert({ id: account.user.id, data: store }, { onConflict: "id" })
+        .select("updated_at").maybeSingle();
+    }
+    if(res.error){ setSync("error"); return; }
+    saveSyncMark({ userId: account.user.id, localAt: store.updatedAt || "", cloudAt: res.data ? res.data.updated_at : "" });
     setSync("synced");
   }
 
@@ -2529,9 +2545,9 @@
           '<div class="n">'+cloudCount+' '+(cloudCount===1?'book':'books')+'</div>'+
           '<div class="when">last changed '+esc(whenLabel(cloudAt))+'</div></div>'+
       '</div>'+
-      '<p class="modal-copy">Which <b>order</b> do you want to keep? Nothing is thrown away: any book '+
-        'from the other side that isn\'t already in the one you keep goes to '+
-        '<b>Read, not yet filed</b>, waiting for you to place it.</p>'+
+      '<p class="modal-copy">Which <b>order</b> do you want to keep? No book is lost: any book only on '+
+        'the other side goes to <b>Read, not yet filed</b>, waiting for you to place it. '+
+        'For a book on both sides, the version you keep wins.</p>'+
       '<div class="row">'+
         '<button class="btn ghost" id="sc-device">Keep this device\'s</button>'+
         '<button class="btn primary" id="sc-cloud">Keep my account\'s</button>'+
