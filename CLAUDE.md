@@ -292,7 +292,12 @@ Everything else through the Goodreads import, holding area and bug fixes is live
   console errors; verified the bar stays hidden on file://. **The email → redirect → session
   → username → sign-out loop can only be tested by the user on the live site** — ask how it
   went.
-- **Increment 2 (sync) is BUILT (2026-09-16), awaiting the user's live test.** Device stays
+- **Increment 2 (sync) is BUILT and VERIFIED by the user on the live site (2026-09-18):**
+  Chrome edit + Edge edit → Edge's push refused → conflict dialog appeared on Edge → picked
+  a side → Chrome refreshed and silently adopted the merged result. The first two test
+  failures were (a) the blind-upsert design bug, fixed, and (b) almost certainly a browser
+  still running cached pre-fix code — hence the footer BUILD marker. **Every deploy needs a
+  hard-refresh in each browser before testing; check the footer build number.** Device stays
   source of truth. `save()` stamps `store.updatedAt` and debounces a push (1.5s) when signed in
   with a username; `pushCatalog()` upserts the whole store into `catalogs.data` (same shape as
   Export). A per-device **sync mark** (`localStorage["the-stacks-sync"]` = `{userId, localAt,
