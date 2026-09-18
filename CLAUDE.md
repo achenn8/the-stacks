@@ -321,8 +321,19 @@ Everything else through the Goodreads import, holding area and bug fixes is live
   plain upsert is only used when this device has never synced (no mark). **Known limit:**
   `mergeLeftovers` rescues whole books, not competing edits to the same book — for a book on
   both sides, the kept side's version wins; the dialog copy says so.
-  Increment 3 is change-username / delete books / delete account (needs an Edge Function) /
-  README privacy rewrite.
+- **Increment 3 (obligations) is BUILT (2026-09-18), awaiting the user's live test.** Clicking
+  `@username` in the header opens **Your account**: change username (`profiles.update` on own
+  row; same 23505/23514 messages; old name released automatically) and **Delete my account**
+  (two-tap, calls `sb.functions.invoke("delete-account")`, then signs out locally and keeps
+  the device's books). The Edge Function lives at `supabase/functions/delete-account/index.ts`
+  — server-side code that CANNOT be in index.html (it needs the secret key); it verifies the
+  caller's token with `admin.auth.getUser(token)` and deletes only that user, cascading to
+  their profile + catalog. **The user must deploy it** (dashboard → Edge Functions → Deploy a
+  new function → name `delete-account` → paste). "Delete just my books" was deliberately
+  dropped: a half-state where the next edit re-uploads them is confusing, and full deletion
+  plus the retained local copy covers the right-to-erasure obligation cleanly. README rewritten:
+  the "nothing is uploaded" claim is now conditional on being signed out, with a "Your data"
+  section and an updated feature list.
 - Project: `https://qvwvenpcwumiaughkzgm.supabase.co`, publishable key
   `sb_publishable_BZqwzcCkX1AP-VkRehszoQ_ZAQhj70f` (public by design — it belongs in index.html;
   NEVER touch the `sb_secret_…` key, which bypasses RLS entirely).

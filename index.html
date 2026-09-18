@@ -69,7 +69,11 @@
   }
   .account-bar .alink:hover{color:var(--card)}
   .account-bar .alink:focus-visible{outline:2px solid var(--stamp); outline-offset:2px; border-radius:2px}
-  .account-bar .acct-name{color:var(--card); font-weight:700}
+  .account-bar .acct-name{color:var(--card); font-weight:700; text-decoration:none}
+  .account-bar .acct-name:hover{text-decoration:underline}
+  /* Account panel's irreversible section, set apart the way the card's Remove is. */
+  .danger{margin-top:22px; padding-top:16px; border-top:1px dashed var(--card-edge)}
+  .danger-lab{font-family:"Bitter",serif; font-weight:500; font-size:15px; color:var(--stamp); margin-bottom:4px}
   .account-bar .acct-warn{color:#E0A58F}
   .build{flex-basis:100%; text-align:right; font-size:10px; letter-spacing:1px; color:rgba(239,231,213,.3); margin-top:6px}
   /* Sync conflict dialog: the two options laid out as a pair, like the tier picks. */
@@ -631,7 +635,7 @@
   "use strict";
 
   // ---- Config ----
-  const BUILD = "2026-09-18.3";      // bump on every deploy; shown in the footer
+  const BUILD = "2026-09-18.4";      // bump on every deploy; shown in the footer
   const KEY = "the-stacks-v3";       // current schema (books also carry addedOn)
   const KEY_V2 = "the-stacks-v2";    // genres[] + finishedOn
   const KEY_V1 = "the-stacks-v1";    // original; both older keys stay on disk as fallbacks
@@ -2249,10 +2253,86 @@
                    : account.sync === "error"    ? ' · <span class="acct-warn">couldn\'t reach your account — will retry</span>'
                    : '';
       accountBar.innerHTML =
-        '<span class="acct-name">@'+esc(account.username)+'</span>'+status+' · '+
+        '<button type="button" class="alink acct-name" id="acctBtn" title="Your account">@'+esc(account.username)+'</button>'+status+' · '+
         '<button type="button" class="alink" id="signOutBtn">Sign out</button>';
+      document.getElementById("acctBtn").onclick = openAccountPanel;
       document.getElementById("signOutBtn").onclick = signOut;
     }
+  }
+
+  // ---- Account panel: the obligations that come with holding people's data ------
+  function openAccountPanel(){
+    flow = null;
+    sheet.innerHTML =
+      '<h2 id="sheetTitle">Your account</h2>'+
+      '<p class="step-tag">Signed in as @'+esc(account.username)+'</p>'+
+      '<label class="fld"><span>Username</span>'+
+        '<input id="ac-name" value="'+esc(account.username)+'" autocomplete="username" '+
+          'autocapitalize="off" spellcheck="false" maxlength="20"></label>'+
+      '<p class="modal-copy soft" id="ac-msg">Letters, numbers and underscores, 3–20. '+
+        'Change it and your old name is free for anyone else.</p>'+
+      '<div class="row"><button class="btn primary" id="ac-save">Save username</button></div>'+
+      '<div class="danger">'+
+        '<div class="danger-lab">Delete my account</div>'+
+        '<p class="modal-copy soft">Removes your login, your username, and the copy of your books '+
+          'saved to your account. <b>The books on this device stay exactly as they are.</b></p>'+
+        '<button type="button" class="removelink" id="ac-delete">Delete my account</button>'+
+        '<p class="modal-copy soft" id="ac-delmsg"></p>'+
+      '</div>'+
+      '<div class="row"><button class="btn ghost" id="ac-close">Close</button></div>';
+
+    const input = document.getElementById("ac-name");
+    const msg = document.getElementById("ac-msg");
+    document.getElementById("ac-close").onclick = closeModal;
+
+    const saveName = async ()=>{
+      const v = input.value.trim();
+      if(v === account.username){ msg.textContent = "That's already your username."; return; }
+      const problem = usernameProblem(v);
+      if(problem){ msg.textContent = problem; input.focus(); return; }
+      const btn = document.getElementById("ac-save");
+      btn.disabled = true; btn.textContent = "Saving…";
+      const { error } = await sb.from("profiles").update({ username: v }).eq("id", account.user.id);
+      btn.disabled = false; btn.textContent = "Save username";
+      if(error){
+        msg.textContent = error.code === "23505" ? "That one's taken — try another."
+                        : error.code === "23514" ? "That name isn't allowed — try another."
+                        : "Couldn't save that. Try again.";
+        input.focus(); return;
+      }
+      account.username = v; renderAccountBar();
+      msg.textContent = "Saved — you're @"+v+" now.";
+    };
+    document.getElementById("ac-save").onclick = saveName;
+    input.onkeydown = (e)=>{ if(e.key==="Enter"){ e.preventDefault(); saveName(); } };
+
+    // Deleting the login itself can't be done from a browser — that needs the server
+    // key, which must never be here. So this calls a small server-side function
+    // (supabase/functions/delete-account) that checks who's asking and deletes only
+    // them; the profile and catalog rows go with the login automatically.
+    document.getElementById("ac-delete").onclick = async ()=>{
+      const btn = document.getElementById("ac-delete");
+      const delmsg = document.getElementById("ac-delmsg");
+      if(!btn.dataset.armed){ btn.dataset.armed = "1"; btn.textContent = "Really delete my account?"; return; }
+      btn.disabled = true; btn.textContent = "Deleting…";
+      const { error } = await sb.functions.invoke("delete-account");
+      if(error){
+        btn.disabled = false; btn.textContent = "Delete my account"; delete btn.dataset.armed;
+        delmsg.textContent = "Couldn't delete right now. Try again in a moment.";
+        return;
+      }
+      closeModal();
+      await signOut();      // the login is already gone; this clears this device's state
+      sheet.innerHTML =
+        '<h2 id="sheetTitle">Your account is gone</h2>'+
+        '<p class="step-tag">Nothing of yours remains on the server</p>'+
+        '<p class="modal-copy">Your login, username and saved catalog have been deleted. '+
+          'Your books are still here on this device, and you can keep using The Stacks without an account.</p>'+
+        '<div class="row"><button class="btn primary" id="ad-ok">OK</button></div>';
+      document.getElementById("ad-ok").onclick = closeModal;
+      openModal(); document.getElementById("ad-ok").focus();
+    };
+    openModal(); input.focus();
   }
 
   function friendlyAuthError(err){
