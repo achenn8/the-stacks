@@ -71,6 +71,7 @@
   .account-bar .alink:focus-visible{outline:2px solid var(--stamp); outline-offset:2px; border-radius:2px}
   .account-bar .acct-name{color:var(--card); font-weight:700}
   .account-bar .acct-warn{color:#E0A58F}
+  .build{flex-basis:100%; text-align:right; font-size:10px; letter-spacing:1px; color:rgba(239,231,213,.3); margin-top:6px}
   /* Sync conflict dialog: the two options laid out as a pair, like the tier picks. */
   .sync-sides{display:grid; grid-template-columns:1fr 1fr; gap:10px; margin:6px 0 14px}
   .sync-side{
@@ -613,6 +614,9 @@
     <button class="vault-btn" id="grBtn">Import from Goodreads</button>
     <input type="file" id="importFile" accept="application/json,.json" hidden>
     <input type="file" id="grFile" accept=".csv,text/csv" hidden>
+    <!-- Which version this browser is actually running. Deploys often serve a cached
+         copy on first load, so this settles "is it the new code?" at a glance. -->
+    <span class="build" id="build"></span>
   </footer>
 
   <div class="scrim" id="scrim" role="dialog" aria-modal="true" aria-labelledby="sheetTitle">
@@ -627,6 +631,7 @@
   "use strict";
 
   // ---- Config ----
+  const BUILD = "2026-09-18.3";      // bump on every deploy; shown in the footer
   const KEY = "the-stacks-v3";       // current schema (books also carry addedOn)
   const KEY_V2 = "the-stacks-v2";    // genres[] + finishedOn
   const KEY_V1 = "the-stacks-v1";    // original; both older keys stay on disk as fallbacks
@@ -2238,9 +2243,10 @@
       document.getElementById("pickNameBtn").onclick = openUsername;
       document.getElementById("signOutBtn").onclick = signOut;
     } else {
-      const status = account.sync === "saving" ? ' · saving…'
-                   : account.sync === "synced" ? ' · saved to your account'
-                   : account.sync === "error"  ? ' · <span class="acct-warn">couldn\'t reach your account — will retry</span>'
+      const status = account.sync === "saving"   ? ' · saving…'
+                   : account.sync === "synced"   ? ' · saved to your account'
+                   : account.sync === "conflict" ? ' · <span class="acct-warn">your account changed elsewhere — checking…</span>'
+                   : account.sync === "error"    ? ' · <span class="acct-warn">couldn\'t reach your account — will retry</span>'
                    : '';
       accountBar.innerHTML =
         '<span class="acct-name">@'+esc(account.username)+'</span>'+status+' · '+
@@ -2380,6 +2386,9 @@
 
   let pushTimer = null;
   let reconciling = false;   // don't push mid-decision
+  // Narrates every sync decision to the browser console (F12 → Console), so a "why
+  // didn't it ask me?" can be answered with evidence instead of guesses.
+  function syncLog(){ try{ console.info.apply(console, ["[stacks sync]"].concat([].slice.call(arguments))); }catch(e){} }
   function schedulePush(){
     if(!sb || !account.user || !account.username || reconciling) return;
     clearTimeout(pushTimer);
@@ -2400,17 +2409,25 @@
       // instead, which is where the conflict dialog lives. Without this guard the
       // last device to push silently won, and the conflict was erased before anyone
       // could be asked about it.
+      syncLog("push: conditional on cloud updated_at =", known);
       res = await sb.from("catalogs").update({ data: store })
         .eq("id", account.user.id).eq("updated_at", known)
         .select("updated_at").maybeSingle();
-      if(!res.error && !res.data){ reconcileOnSignIn(); return; }   // 0 rows matched
+      if(!res.error && !res.data){
+        syncLog("push REFUSED: the account changed since this device last synced → reconciling");
+        setSync("conflict");
+        reconcileOnSignIn();
+        return;
+      }
     } else {
       // Never synced from this device: create the row, or take it over.
+      syncLog("push: first sync from this device (no mark) → upsert");
       res = await sb.from("catalogs")
         .upsert({ id: account.user.id, data: store }, { onConflict: "id" })
         .select("updated_at").maybeSingle();
     }
-    if(res.error){ setSync("error"); return; }
+    if(res.error){ syncLog("push ERROR", res.error); setSync("error"); return; }
+    syncLog("push ok; cloud now at", res.data ? res.data.updated_at : "(no row returned)");
     saveSyncMark({ userId: account.user.id, localAt: store.updatedAt || "", cloudAt: res.data ? res.data.updated_at : "" });
     setSync("synced");
   }
@@ -2485,25 +2502,32 @@
     const localCount = countStore(store);
     const mark = loadSyncMark();
     const sameUser = !!(mark && mark.userId === account.user.id);
+    syncLog("reconcile:", { localCount, cloudCount, sameUser,
+      localAt: store.updatedAt || "", markLocalAt: mark ? mark.localAt : null,
+      cloudAt: row ? row.updated_at : null, markCloudAt: mark ? mark.cloudAt : null });
 
-    if(!localCount && !cloudCount){ saveSyncMark({ userId: account.user.id, localAt: store.updatedAt||"", cloudAt: row ? row.updated_at : "" }); setSync("synced"); return; }
-    if(!localCount && cloudCount){ adoptStore(cloudStore, row.updated_at); setSync("synced"); return; }
+    if(!localCount && !cloudCount){ syncLog("→ nothing on either side"); saveSyncMark({ userId: account.user.id, localAt: store.updatedAt||"", cloudAt: row ? row.updated_at : "" }); setSync("synced"); return; }
+    if(!localCount && cloudCount){ syncLog("→ device empty: adopting the account's books"); adoptStore(cloudStore, row.updated_at); setSync("synced"); return; }
     if(localCount && !cloudCount){
       // Only upload silently when we KNOW these books belong to this account. On a
       // shared device the last person's shelf must never quietly become yours.
-      if(sameUser){ pushCatalog(); return; }
+      if(sameUser){ syncLog("→ account empty, same user: uploading"); pushCatalog(); return; }
+      syncLog("→ account empty, unknown provenance: asking");
       openFirstSyncPrompt(localCount);
       return;
     }
     // Both sides have books.
     if(fingerprint(cloudStore) === fingerprint(store)){
+      syncLog("→ identical on both sides: nothing to do");
       saveSyncMark({ userId: account.user.id, localAt: store.updatedAt||"", cloudAt: row.updated_at });
       setSync("synced"); return;
     }
     const localChanged = !sameUser || (store.updatedAt || "") > (mark.localAt || "");
     const cloudChanged = !sameUser || row.updated_at !== mark.cloudAt;
-    if(sameUser && !localChanged){ adoptStore(cloudStore, row.updated_at); setSync("synced"); return; }
-    if(sameUser && !cloudChanged){ pushCatalog(); return; }
+    syncLog("→ both have books and differ:", { localChanged, cloudChanged });
+    if(sameUser && !localChanged){ syncLog("→ only the account moved: adopting it"); adoptStore(cloudStore, row.updated_at); setSync("synced"); return; }
+    if(sameUser && !cloudChanged){ syncLog("→ only this device moved: uploading"); pushCatalog(); return; }
+    syncLog("→ BOTH moved: asking (conflict dialog)");
     openSyncConflict(cloudStore, row.updated_at, localCount, cloudCount);
   }
 
@@ -2597,6 +2621,8 @@
   document.addEventListener("keydown", e=>{ if(e.key==="Escape") closeGenrePop(); });
 
   render();
+  document.getElementById("build").textContent = "build " + BUILD;
+  syncLog("build", BUILD);
   initAccount();
 })();
 </script>
